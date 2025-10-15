@@ -17,6 +17,7 @@ type ThemeContextValue = {
   theme: Theme;
   resolvedTheme: ResolvedTheme;
   setTheme: (value: Theme) => void;
+  isReady: boolean;
 };
 
 const STORAGE_KEY = 'pandora-box:theme';
@@ -48,6 +49,7 @@ const getInitialTheme = (): Theme => {
   }
 
   const mode = document.documentElement.dataset.themeMode;
+  
   if (mode === 'light' || mode === 'dark' || mode === 'system') {
     return mode;
   }
@@ -75,6 +77,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
+      
       if (stored === 'light' || stored === 'dark' || stored === 'system') {
         setThemeState(stored);
       }
@@ -129,8 +132,9 @@ export function ThemeProvider({ children }: PropsWithChildren) {
       theme,
       resolvedTheme,
       setTheme,
+      isReady,
     }),
-    [resolvedTheme, setTheme, theme],
+    [resolvedTheme, setTheme, theme, isReady],
   );
 
   return <ThemeContext.Provider value={contextValue}>{children}</ThemeContext.Provider>;

@@ -13,11 +13,12 @@ const themeInitScript = `
     const mode = stored === 'light' || stored === 'dark' ? stored : 'system';
     const resolved = mode === 'system' ? systemTheme : mode;
 
+
     root.dataset.theme = resolved;
     root.dataset.themeMode = mode;
     root.style.colorScheme = resolved;
   } catch (error) {
-    // no-op
+    console.error('[INIT SCRIPT ERROR]', error);
   }
 })();
 `;

@@ -9,7 +9,7 @@ const THEMES: { label: string; value: Theme; description: string; shortcut: stri
 ];
 
 export function ThemeToggle() {
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme, isReady } = useTheme();
 
   return (
     <section
@@ -26,7 +26,8 @@ export function ThemeToggle() {
       </header>
       <div className="grid gap-2 sm:grid-cols-3">
         {THEMES.map((option) => {
-          const isActive = theme === option.value;
+          // Only show active state after hydration is complete
+          const isActive = isReady && theme === option.value;
 
           return (
             <button
