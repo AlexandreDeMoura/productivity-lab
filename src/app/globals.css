@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #f8fafc;
+  --background-muted: #e2e8f0;
+  --surface: #ffffff;
+  --surface-hover: #f1f5f9;
+  --foreground: #0f172a;
+  --foreground-muted: #475569;
+  --accent: #2563eb;
+  --accent-foreground: #f8fafc;
+  --border: #cbd5f5;
+  --ring: rgba(37, 99, 235, 0.35);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0b1120;
+  --background-muted: #111c33;
+  --surface: #111827;
+  --surface-hover: #1e293b;
+  --foreground: #e2e8f0;
+  --foreground-muted: #94a3b8;
+  --accent: #60a5fa;
+  --accent-foreground: #020617;
+  --border: #1f2a44;
+  --ring: rgba(96, 165, 250, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --background: #0b1120;
+    --background-muted: #111c33;
+    --surface: #111827;
+    --surface-hover: #1e293b;
+    --foreground: #e2e8f0;
+    --foreground-muted: #94a3b8;
+    --accent: #60a5fa;
+    --accent-foreground: #020617;
+    --border: #1f2a44;
+    --ring: rgba(96, 165, 250, 0.45);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-muted: var(--background-muted);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --shadow-soft: 0 25px 65px -35px rgb(15 23 42 / 0.55);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    transition: background 180ms ease, color 180ms ease;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
 }

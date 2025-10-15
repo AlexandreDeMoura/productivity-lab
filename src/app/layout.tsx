@@ -1,6 +1,27 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/components/theme-provider";
+
+const themeInitScript = `
+(() => {
+  const storageKey = 'pandora-box:theme';
+  try {
+    const root = document.documentElement;
+    const stored = localStorage.getItem(storageKey);
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const mode = stored === 'light' || stored === 'dark' ? stored : 'system';
+    const resolved = mode === 'system' ? systemTheme : mode;
+
+
+    root.dataset.theme = resolved;
+    root.dataset.themeMode = mode;
+    root.style.colorScheme = resolved;
+  } catch (error) {
+    console.error('[INIT SCRIPT ERROR]', error);
+  }
+})();
+`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,11 +44,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{ __html: themeInitScript }}
+        />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
       >
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
