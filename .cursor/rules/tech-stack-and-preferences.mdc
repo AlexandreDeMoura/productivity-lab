@@ -1,0 +1,48 @@
+---
+description: Coding style preferences and tech stack
+alwaysApply: true
+---
+
+# Pandora Box - Tech Stack & Preferences
+
+## Stack
+- Next.js 15.5.5 (App Router, Turbopack)
+- React 19, TypeScript (strict)
+- Tailwind CSS 4
+- PostgreSQL (Supabase) + Supabase Auth
+- React Hook Form + Zod validation
+- React Query (client data), useState/Context (local state)
+- Jest + React Testing Library
+
+## Code Style
+- Functional components with arrow functions
+- Named exports preferred
+- TypeScript: explicit types, avoid `any`
+- Files: PascalCase for components, camelCase for utils/actions
+- Single component per file
+- Brief comment above functions/sections, none inside function bodies
+
+## Structure
+src/
+├── app/ # Next.js pages
+├── components/ # Shared components
+│ └── ui/ # Base UI components
+├── features/ # Feature modules
+│ └── [feature]/
+│ ├── components/
+│ ├── actions/ # Server actions
+│ └── schemas/ # Zod schemas
+├── lib/ # Utils, Supabase config
+└── hooks/ # Custom hooks
+
+## Server Actions
+- Use `"use server"`, validate with Zod
+- Return: `{ success: boolean; data?: T; error?: string }`
+- Place in feature-based `actions/` folders
+
+## Key Patterns
+- Server Components by default, `"use client"` only when needed
+- React Query for client-side fetching
+- Tailwind utilities (avoid @apply)
+- Mobile-first responsive design
+- Co-locate tests with source files
