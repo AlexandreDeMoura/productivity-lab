@@ -93,7 +93,7 @@ create table public.todos (
   done boolean not null default false,
   
   -- User ownership (foreign key to auth.users)
-  user_id uuid references auth.users (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
   
   -- Audit timestamps
   created_at timestamptz not null default now(),
