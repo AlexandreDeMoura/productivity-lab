@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState, useEffect, useTransition } from "react";
+import { FormEvent, useState, useEffect, useTransition, useOptimistic } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getTodos, createTodo, toggleTodo, deleteTodo, clearCompletedTodos } from "@/features/todos/actions/todoActions";
@@ -15,8 +15,37 @@ const filters: Array<{ label: string; value: Filter }> = [
   { label: "Completed", value: "completed" },
 ];
 
+type OptimisticTodo = Todo & { optimistic?: boolean };
+
+type OptimisticAction =
+  | { type: "create"; todo: OptimisticTodo }
+  | { type: "toggle"; id: number }
+  | { type: "delete"; id: number }
+  | { type: "clearCompleted" };
+
 export default function Home() {
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const [todos, setTodos] = useState<OptimisticTodo[]>([]);
+  const [optimisticTodos, updateOptimisticTodos] = useOptimistic<
+    OptimisticTodo[],
+    OptimisticAction
+  >(todos, (currentTodos, action) => {
+    switch (action.type) {
+      case "create":
+        return [action.todo, ...currentTodos];
+      case "toggle":
+        return currentTodos.map((todo) =>
+          todo.id === action.id
+            ? { ...todo, done: !todo.done, optimistic: true }
+            : todo
+        );
+      case "delete":
+        return currentTodos.filter((todo) => todo.id !== action.id);
+      case "clearCompleted":
+        return currentTodos.filter((todo) => !todo.done);
+      default:
+        return currentTodos;
+    }
+  });
   const [newTodo, setNewTodo] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [isPending, startTransition] = useTransition();
@@ -45,7 +74,7 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const filteredTodos = todos.filter((todo) => {
+  const filteredTodos = optimisticTodos.filter((todo) => {
     if (filter === "completed") {
       return todo.done;
     }
@@ -55,8 +84,8 @@ export default function Home() {
     return true;
   });
 
-  const remaining = todos.filter((todo) => !todo.done).length;
-  const completed = todos.length - remaining;
+  const remaining = optimisticTodos.filter((todo) => !todo.done).length;
+  const completed = optimisticTodos.length - remaining;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -71,13 +100,26 @@ export default function Home() {
     }
 
     setError(null);
+    const tempId = -Math.floor(Math.random() * 1_000_000 + Date.now());
+    const now = new Date().toISOString();
+    const optimisticTodo: OptimisticTodo = {
+      id: tempId,
+      text: value,
+      done: false,
+      user_id: "optimistic",
+      created_at: now,
+      updated_at: now,
+      optimistic: true,
+    };
+    setNewTodo("");
     startTransition(async () => {
+      updateOptimisticTodos({ type: "create", todo: optimisticTodo });
       const result = await createTodo({ text: value });
       if (result.success && result.data) {
         setTodos((previous) => [result.data!, ...previous]);
-        setNewTodo("");
       } else {
         setError(result.error || "Failed to create todo");
+        setNewTodo(value);
       }
     });
   };
@@ -85,6 +127,7 @@ export default function Home() {
   const handleToggleTodo = async (id: number) => {
     setError(null);
     startTransition(async () => {
+      updateOptimisticTodos({ type: "toggle", id });
       const result = await toggleTodo({ id });
       if (result.success && result.data) {
         setTodos((previous) =>
@@ -101,6 +144,7 @@ export default function Home() {
   const handleRemoveTodo = async (id: number) => {
     setError(null);
     startTransition(async () => {
+      updateOptimisticTodos({ type: "delete", id });
       const result = await deleteTodo({ id });
       if (result.success) {
         setTodos((previous) => previous.filter((todo) => todo.id !== id));
@@ -113,6 +157,7 @@ export default function Home() {
   const handleClearCompleted = async () => {
     setError(null);
     startTransition(async () => {
+      updateOptimisticTodos({ type: "clearCompleted" });
       const result = await clearCompletedTodos();
       if (result.success) {
         setTodos((previous) => previous.filter((todo) => !todo.done));
@@ -228,7 +273,7 @@ export default function Home() {
                       checked={todo.done}
                       onChange={() => handleToggleTodo(todo.id)}
                       className="size-4 rounded border-border bg-background text-accent focus:ring-2 focus:ring-accent/40"
-                      disabled={isPending}
+                      disabled={isPending || todo.optimistic}
                     />
                     <label
                       htmlFor={`todo-${todo.id}`}
@@ -244,7 +289,7 @@ export default function Home() {
                       type="button"
                       onClick={() => handleRemoveTodo(todo.id)}
                       className="rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-foreground-muted transition hover:border-border hover:text-foreground disabled:opacity-50"
-                      disabled={isPending}
+                      disabled={isPending || todo.optimistic}
                     >
                       Remove
                     </button>
