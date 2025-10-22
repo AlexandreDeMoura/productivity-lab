@@ -1,20 +1,13 @@
 'use client';
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { getTodos, createTodo, toggleTodo, deleteTodo, clearCompletedTodos } from "@/features/todos/actions/todoActions";
+import { signOut } from "@/features/auth/actions/authActions";
+import type { Todo } from "@/types/database";
 
 type Filter = "all" | "active" | "completed";
-
-type Todo = {
-  id: number;
-  text: string;
-  done: boolean;
-};
-
-const initialTodos: Todo[] = [
-  { id: 1, text: "Explore the design system tokens", done: false },
-  { id: 2, text: "Build a themed component within Pandora", done: true },
-  { id: 3, text: "Ship a polished todo experience", done: false },
-];
 
 const filters: Array<{ label: string; value: Filter }> = [
   { label: "All", value: "all" },
@@ -23,9 +16,34 @@ const filters: Array<{ label: string; value: Filter }> = [
 ];
 
 export default function Home() {
-  const [todos, setTodos] = useState<Todo[]>(initialTodos);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [newTodo, setNewTodo] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [isPending, startTransition] = useTransition();
+  const [isSignOutPending, startSignOutTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const router = useRouter();
+
+  // Load todos on mount
+  useEffect(() => {
+    loadTodos();
+  }, []);
+
+  const loadTodos = async () => {
+    setIsLoading(true);
+    setError(null);
+    const result = await getTodos();
+    if (result.success && result.data) {
+      setTodos(result.data);
+      setIsAuthenticated(true);
+    } else {
+      setError(result.error || "Failed to load todos");
+      setIsAuthenticated(false);
+    }
+    setIsLoading(false);
+  };
 
   const filteredTodos = todos.filter((todo) => {
     if (filter === "completed") {
@@ -40,42 +58,138 @@ export default function Home() {
   const remaining = todos.filter((todo) => !todo.done).length;
   const completed = todos.length - remaining;
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!isAuthenticated) {
+      setError("Please sign in to add todos");
+      return;
+    }
     const value = newTodo.trim();
     if (!value) {
       return;
     }
 
-    setTodos((previous) => [
-      ...previous,
-      { id: Date.now(), text: value, done: false },
-    ]);
-    setNewTodo("");
+    setError(null);
+    startTransition(async () => {
+      const result = await createTodo({ text: value });
+      if (result.success && result.data) {
+        setTodos((previous) => [result.data!, ...previous]);
+        setNewTodo("");
+      } else {
+        setError(result.error || "Failed to create todo");
+      }
+    });
   };
 
-  const toggleTodo = (id: number) => {
-    setTodos((previous) =>
-      previous.map((todo) =>
-        todo.id === id ? { ...todo, done: !todo.done } : todo,
-      ),
-    );
+  const handleToggleTodo = async (id: number) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await toggleTodo({ id });
+      if (result.success && result.data) {
+        setTodos((previous) =>
+          previous.map((todo) =>
+            todo.id === id ? result.data! : todo
+          )
+        );
+      } else {
+        setError(result.error || "Failed to toggle todo");
+      }
+    });
   };
 
-  const removeTodo = (id: number) => {
-    setTodos((previous) => previous.filter((todo) => todo.id !== id));
+  const handleRemoveTodo = async (id: number) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await deleteTodo({ id });
+      if (result.success) {
+        setTodos((previous) => previous.filter((todo) => todo.id !== id));
+      } else {
+        setError(result.error || "Failed to delete todo");
+      }
+    });
   };
 
-  const clearCompleted = () => {
-    setTodos((previous) => previous.filter((todo) => !todo.done));
+  const handleClearCompleted = async () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await clearCompletedTodos();
+      if (result.success) {
+        setTodos((previous) => previous.filter((todo) => !todo.done));
+      } else {
+        setError(result.error || "Failed to clear completed todos");
+      }
+    });
+  };
+
+  const handleSignOut = async () => {
+    setError(null);
+    startSignOutTransition(async () => {
+      const result = await signOut();
+      if (result.success) {
+        setTodos([]);
+        setIsAuthenticated(false);
+        router.replace("/sign-in");
+        router.refresh();
+      } else {
+        setError(result.error || "Failed to sign out");
+      }
+    });
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col items-center justify-center gap-12 px-6 py-16">
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col items-center justify-center gap-10 px-6 py-16">
+      <header className="flex w-full items-center justify-end gap-4">
+        {isAuthenticated ? (
+          <button
+            onClick={handleSignOut}
+            className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium transition hover:bg-background disabled:opacity-50"
+            disabled={isSignOutPending}
+          >
+            {isSignOutPending ? "Signing out..." : "Sign out"}
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-foreground-muted">
+            <span>Have an account?</span>
+            <Link
+              href="/sign-in"
+              className="font-semibold text-accent hover:underline"
+            >
+              Sign in
+            </Link>
+            <span>/</span>
+            <Link
+              href="/sign-up"
+              className="font-semibold text-accent hover:underline"
+            >
+              Sign up
+            </Link>
+          </div>
+        )}
+      </header>
       <section className="grid w-full gap-6 rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-soft)] transition-colors sm:grid-cols-[2fr_1fr]">
         <article className="flex h-full flex-col justify-between gap-6 rounded-md border border-dashed border-border bg-background p-6 transition-colors">
           <div className="space-y-4">
             <h2 className="text-2xl font-semibold">Today&apos;s plan</h2>
+            
+            {error && (
+              <div className="rounded-md border border-red-500 bg-red-50 dark:bg-red-950/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+                {error}
+                {error === "You must be logged in to view todos" && (
+                  <p className="mt-2 text-xs">
+                    <Link className="font-medium text-accent" href="/sign-in">
+                      Sign in
+                    </Link>{" "}
+                    or{" "}
+                    <Link className="font-medium text-accent" href="/sign-up">
+                      create an account
+                    </Link>{" "}
+                    to manage your todos.
+                  </p>
+                )}
+              </div>
+            )}
+            
             <form
               onSubmit={handleSubmit}
               className="flex flex-col gap-3 rounded-md border border-border bg-surface p-3 sm:flex-row"
@@ -86,17 +200,23 @@ export default function Home() {
                 placeholder="Add a new task..."
                 className="w-full rounded-md border border-transparent bg-background px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
                 aria-label="New todo"
+                disabled={isPending || !isAuthenticated}
               />
               <button
                 type="submit"
-                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent/90"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent/90 disabled:opacity-50"
+                disabled={isPending || !isAuthenticated}
               >
                 Add task
               </button>
             </form>
 
             <div className="space-y-3">
-              {filteredTodos.length > 0 ? (
+              {isLoading ? (
+                <div className="rounded-md border border-dashed border-border bg-background px-4 py-6 text-center text-sm text-foreground-muted">
+                  Loading todos...
+                </div>
+              ) : filteredTodos.length > 0 ? (
                 filteredTodos.map((todo) => (
                   <div
                     key={todo.id}
@@ -106,8 +226,9 @@ export default function Home() {
                       id={`todo-${todo.id}`}
                       type="checkbox"
                       checked={todo.done}
-                      onChange={() => toggleTodo(todo.id)}
+                      onChange={() => handleToggleTodo(todo.id)}
                       className="size-4 rounded border-border bg-background text-accent focus:ring-2 focus:ring-accent/40"
+                      disabled={isPending}
                     />
                     <label
                       htmlFor={`todo-${todo.id}`}
@@ -121,8 +242,9 @@ export default function Home() {
                     </label>
                     <button
                       type="button"
-                      onClick={() => removeTodo(todo.id)}
-                      className="rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-foreground-muted transition hover:border-border hover:text-foreground"
+                      onClick={() => handleRemoveTodo(todo.id)}
+                      className="rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-foreground-muted transition hover:border-border hover:text-foreground disabled:opacity-50"
+                      disabled={isPending}
                     >
                       Remove
                     </button>
@@ -166,8 +288,9 @@ export default function Home() {
               })}
               <button
                 type="button"
-                onClick={clearCompleted}
-                className="rounded-md border border-border px-3 py-1 text-xs font-semibold text-foreground-muted transition hover:bg-surface-hover hover:text-foreground"
+                onClick={handleClearCompleted}
+                className="rounded-md border border-border px-3 py-1 text-xs font-semibold text-foreground-muted transition hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+                disabled={isPending}
               >
                 Clear completed
               </button>
