@@ -41,19 +41,16 @@ export async function getTodos(
   input?: GetTodosInput
 ): Promise<ActionResponse<Todo[]>> {
   try {
-    const supabase = await createClient();
-
     // Validate input
     const validatedInput = getTodosSchema.parse(input || {});
 
-    // Get current user
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return { success: false, error: "You must be logged in to view todos" };
+    // Get authenticated user
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError || !user) {
+      return { success: false, error: authError };
     }
+
+    const supabase = await createClient();
 
     // Build query
     let query = supabase
