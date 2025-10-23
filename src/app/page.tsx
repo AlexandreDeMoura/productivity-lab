@@ -562,9 +562,6 @@ export default function Home() {
             <section className="workspace-block__content glass-panel">
               <header className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-4">
-                  <p className="text-[13px] font-medium uppercase tracking-[0.32em] text-foreground-muted">
-                    Calm Productivity
-                  </p>
                   <div>
                     <h1 className="text-[28px] font-semibold leading-tight tracking-[0.5px] text-foreground">
                       Today&apos;s Focus
@@ -654,7 +651,7 @@ export default function Home() {
                 </div>
               )}
 
-              <section className="mt-12 space-y-8">
+              <section className="mt-8 space-y-6">
                 <div>
                   <h2 className="section-title">Active</h2>
                   <div className="mt-6 space-y-4">
