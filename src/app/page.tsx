@@ -1,19 +1,25 @@
 'use client';
 
-import { FormEvent, useState, useEffect, useTransition, useOptimistic } from "react";
+import {
+  FormEvent,
+  useState,
+  useEffect,
+  useTransition,
+  useOptimistic,
+  useMemo,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getTodos, createTodo, toggleTodo, deleteTodo, clearCompletedTodos } from "@/features/todos/actions/todoActions";
+import { Plus } from "lucide-react";
+import {
+  getTodos,
+  createTodo,
+  toggleTodo,
+  deleteTodo,
+  clearCompletedTodos,
+} from "@/features/todos/actions/todoActions";
 import { signOut } from "@/features/auth/actions/authActions";
 import type { Todo } from "@/types/database";
-
-type Filter = "all" | "active" | "completed";
-
-const filters: Array<{ label: string; value: Filter }> = [
-  { label: "All", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Completed", value: "completed" },
-];
 
 type OptimisticTodo = Todo & { optimistic?: boolean };
 
@@ -31,7 +37,7 @@ export default function Home() {
   >(todos, (currentTodos, action) => {
     switch (action.type) {
       case "create":
-        return [action.todo, ...currentTodos];
+        return [...currentTodos, action.todo];
       case "toggle":
         return currentTodos.map((todo) =>
           todo.id === action.id
@@ -47,15 +53,33 @@ export default function Home() {
     }
   });
   const [newTodo, setNewTodo] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
   const [isPending, startTransition] = useTransition();
   const [isSignOutPending, startSignOutTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
   const router = useRouter();
 
-  // Load todos on mount
+  const dayFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+      }),
+    []
+  );
+
+  const fullDateLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }).format(new Date()),
+    []
+  );
+
   useEffect(() => {
     loadTodos();
   }, []);
@@ -74,18 +98,19 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const filteredTodos = optimisticTodos.filter((todo) => {
-    if (filter === "completed") {
-      return todo.done;
-    }
-    if (filter === "active") {
-      return !todo.done;
-    }
-    return true;
-  });
+  const sortByCreatedAt = (a: OptimisticTodo, b: OptimisticTodo) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 
-  const remaining = optimisticTodos.filter((todo) => !todo.done).length;
-  const completed = optimisticTodos.length - remaining;
+  const activeTodos = optimisticTodos
+    .filter((todo) => !todo.done)
+    .sort(sortByCreatedAt);
+
+  const completedTodos = optimisticTodos
+    .filter((todo) => todo.done)
+    .sort(sortByCreatedAt);
+
+  const remaining = activeTodos.length;
+  const completedCount = completedTodos.length;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,6 +119,7 @@ export default function Home() {
       setError("Please sign in to add todos");
       return;
     }
+
     const value = newTodo.trim();
     if (!value) {
       return;
@@ -116,7 +142,7 @@ export default function Home() {
       updateOptimisticTodos({ type: "create", todo: optimisticTodo });
       const result = await createTodo({ text: value });
       if (result.success && result.data) {
-        setTodos((previous) => [result.data!, ...previous]);
+        setTodos((previous) => [...previous, result.data!]);
       } else {
         setError(result.error || "Failed to create todo");
         setNewTodo(value);
@@ -131,9 +157,7 @@ export default function Home() {
       const result = await toggleTodo({ id });
       if (result.success && result.data) {
         setTodos((previous) =>
-          previous.map((todo) =>
-            todo.id === id ? result.data! : todo
-          )
+          previous.map((todo) => (todo.id === id ? result.data! : todo))
         );
       } else {
         setError(result.error || "Failed to toggle todo");
@@ -182,192 +206,266 @@ export default function Home() {
     });
   };
 
+  const renderTodo = (todo: OptimisticTodo) => {
+    const isCompleted = todo.done;
+    const isDisabled = isPending || todo.optimistic;
+    const createdAt = new Date(todo.created_at);
+    const createdOn = Number.isNaN(createdAt.getTime())
+      ? null
+      : dayFormatter.format(createdAt);
+
+    return (
+      <div
+        key={todo.id}
+        className={`todo-item group ${
+          todo.optimistic ? "todo-item--optimistic" : ""
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => handleToggleTodo(todo.id)}
+          className={`todo-checkbox ${isCompleted ? "todo-checkbox--checked" : ""}`}
+          aria-pressed={isCompleted}
+          aria-label={isCompleted ? "Mark todo as active" : "Mark todo as done"}
+          disabled={isDisabled}
+        >
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-3.5 w-3.5">
+            <path
+              d="M16.5 5.75 8.25 14 4.5 10.25"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.75"
+            />
+          </svg>
+        </button>
+
+        <div className="flex flex-1 flex-col gap-1">
+          <p className={`todo-text ${isCompleted ? "todo-text--completed" : ""}`}>
+            {todo.text}
+          </p>
+          {createdOn && (
+            <span className="todo-meta">Added {createdOn}</span>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => handleRemoveTodo(todo.id)}
+          className="todo-action"
+          disabled={isDisabled}
+          aria-label="Delete todo"
+        >
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4">
+            <path
+              d="m6 6 8 8M14 6l-8 8"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeWidth="1.6"
+            />
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col items-center justify-center gap-10 px-6 py-16">
-      <header className="flex w-full items-center justify-end gap-4">
-        {isAuthenticated ? (
-          <button
-            onClick={handleSignOut}
-            className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium transition hover:bg-background disabled:opacity-50"
-            disabled={isSignOutPending}
-          >
-            {isSignOutPending ? "Signing out..." : "Sign out"}
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 text-sm text-foreground-muted">
-            <span>Have an account?</span>
-            <Link
-              href="/sign-in"
-              className="font-semibold text-accent hover:underline"
-            >
-              Sign in
-            </Link>
-            <span>/</span>
-            <Link
-              href="/sign-up"
-              className="font-semibold text-accent hover:underline"
-            >
-              Sign up
-            </Link>
-          </div>
-        )}
-      </header>
-      <section className="grid w-full gap-6 rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-soft)] transition-colors sm:grid-cols-[2fr_1fr]">
-        <article className="flex h-full flex-col justify-between gap-6 rounded-md border border-dashed border-border bg-background p-6 transition-colors">
-          <div className="space-y-4">
-            <h2 className="text-2xl font-semibold">Today&apos;s plan</h2>
-            
-            {error && (
-              <div className="rounded-md border border-red-500 bg-red-50 dark:bg-red-950/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-                {error}
-                {error === "You must be logged in to view todos" && (
-                  <p className="mt-2 text-xs">
-                    <Link className="font-medium text-accent" href="/sign-in">
-                      Sign in
-                    </Link>{" "}
-                    or{" "}
-                    <Link className="font-medium text-accent" href="/sign-up">
-                      create an account
-                    </Link>{" "}
-                    to manage your todos.
-                  </p>
-                )}
+    <main className="flex min-h-screen justify-center bg-background px-4 py-16 sm:px-6 sm:py-24">
+      <div className="w-full max-w-[40rem]">
+        <section className="glass-panel">
+          <header className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-4">
+              <p className="text-[13px] font-medium uppercase tracking-[0.32em] text-foreground-muted">
+                Calm Productivity
+              </p>
+              <div>
+                <h1 className="text-[28px] font-semibold leading-tight tracking-[0.5px] text-foreground">
+                  Today&apos;s Focus
+                </h1>
+                <p className="mt-2 text-sm font-medium tracking-[0.12em] text-foreground-subtle">
+                  {fullDateLabel}
+                </p>
+              </div>
+              <p className="text-sm text-foreground-muted">
+                {remaining === 0
+                  ? "Your mind is clear. Enjoy the calm."
+                  : `${remaining} ${remaining === 1 ? "task" : "tasks"} waiting patiently.`}
+              </p>
+            </div>
+
+            {isAuthenticated ? (
+              <button
+                onClick={handleSignOut}
+                className="inline-flex h-10 min-w-[3.5rem] items-center justify-center rounded-full border border-border px-4 text-xs font-semibold cursor-pointer uppercase tracking-[0.2em] text-foreground-muted transition hover:border-accent/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isSignOutPending}
+              >
+                {isSignOutPending ? "Signing out…" : "Sign out"}
+              </button>
+            ) : (
+              <div className="text-xs font-medium uppercase tracking-[0.22em] text-foreground-muted">
+                <Link href="/sign-in" className="transition hover:text-foreground">
+                  Sign in
+                </Link>
+                <span className="px-1 text-foreground-subtle">/</span>
+                <Link href="/sign-up" className="transition hover:text-foreground">
+                  Sign up
+                </Link>
               </div>
             )}
-            
-            <form
-              onSubmit={handleSubmit}
-              className="flex flex-col gap-3 rounded-md border border-border bg-surface p-3 sm:flex-row"
-            >
+          </header>
+
+          <form
+            onSubmit={handleSubmit}
+            className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center"
+          >
+            <div className="input-shell">
               <input
                 value={newTodo}
                 onChange={(event) => setNewTodo(event.target.value)}
-                placeholder="Add a new task..."
-                className="w-full rounded-md border border-transparent bg-background px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                placeholder="Add a gentle reminder…"
+                className="input-field"
                 aria-label="New todo"
                 disabled={isPending || !isAuthenticated}
               />
-              <button
-                type="submit"
-                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent/90 disabled:opacity-50"
-                disabled={isPending || !isAuthenticated}
-              >
-                Add task
-              </button>
-            </form>
+            </div>
+            <button
+              type="submit"
+              className="accent-button"
+              disabled={isPending || !isAuthenticated || !newTodo.trim()}
+            >
+              {isPending ? "Adding…" : <Plus className="h-5 w-5" />}
+            </button>
+          </form>
 
-            <div className="space-y-3">
-              {isLoading ? (
-                <div className="rounded-md border border-dashed border-border bg-background px-4 py-6 text-center text-sm text-foreground-muted">
-                  Loading todos...
-                </div>
-              ) : filteredTodos.length > 0 ? (
-                filteredTodos.map((todo) => (
-                  <div
-                    key={todo.id}
-                    className="flex items-center gap-3 rounded-md border border-border bg-background px-4 py-3 text-sm transition hover:bg-background-muted/60"
+          {!isAuthenticated && (
+            <p className="mt-3 text-xs font-medium tracking-[0.16em] text-foreground-subtle">
+              Sign in to start curating your list.
+            </p>
+          )}
+
+          {error && (
+            <div className="notice notice--error">
+              <p>{error}</p>
+              {error === "You must be logged in to view todos" && (
+                <p className="notice__cta">
+                  <Link
+                    className="underline-offset-4 transition hover:text-foreground"
+                    href="/sign-in"
                   >
-                    <input
-                      id={`todo-${todo.id}`}
-                      type="checkbox"
-                      checked={todo.done}
-                      onChange={() => handleToggleTodo(todo.id)}
-                      className="size-4 rounded border-border bg-background text-accent focus:ring-2 focus:ring-accent/40"
-                      disabled={isPending || todo.optimistic}
-                    />
-                    <label
-                      htmlFor={`todo-${todo.id}`}
-                      className={`flex-1 text-sm transition ${
-                        todo.done
-                          ? "text-foreground-muted line-through"
-                          : "text-foreground"
-                      }`}
-                    >
-                      {todo.text}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTodo(todo.id)}
-                      className="rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-foreground-muted transition hover:border-border hover:text-foreground disabled:opacity-50"
-                      disabled={isPending || todo.optimistic}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-md border border-dashed border-border bg-background px-4 py-6 text-center text-sm text-foreground-muted">
-                  No tasks found for this view. Create a new one above or
-                  switch the filter.
-                </div>
+                    Sign in
+                  </Link>{" "}
+                  or{" "}
+                  <Link
+                    className="underline-offset-4 transition hover:text-foreground"
+                    href="/sign-up"
+                  >
+                    create an account
+                  </Link>{" "}
+                  to manage your todos.
+                </p>
               )}
             </div>
-          </div>
+          )}
 
-          <div className="flex flex-col gap-3 rounded-md border border-border bg-surface-hover p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3 text-sm">
-              <span className="rounded-full border border-border bg-background px-3 py-1 text-xs uppercase tracking-wide text-foreground-muted">
-                {remaining} active
-              </span>
-              <span className="rounded-full border border-border bg-background px-3 py-1 text-xs uppercase tracking-wide text-foreground-muted">
-                {completed} done
-              </span>
+          <section className="mt-12 space-y-8">
+            <div>
+              <h2 className="section-title">Active</h2>
+              <div className="mt-6 space-y-4">
+                {isLoading ? (
+                  <p className="text-sm text-foreground-subtle">
+                    Loading your tasks…
+                  </p>
+                ) : activeTodos.length > 0 ? (
+                  activeTodos.map(renderTodo)
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-state__icon" aria-hidden="true">
+                      <svg viewBox="0 0 40 40" className="h-10 w-10">
+                        <circle
+                          cx="20"
+                          cy="20"
+                          r="12"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeDasharray="2 4"
+                        />
+                        <path
+                          d="M16 22.5c1.2 1 2.8 1.6 4 1.6 1.2 0 2.8-.6 4-1.6"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          fill="none"
+                        />
+                        <circle cx="17" cy="17" r="1.4" fill="currentColor" />
+                        <circle cx="23" cy="17" r="1.4" fill="currentColor" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="empty-state__title">
+                        {isAuthenticated
+                          ? "Your mind is clear."
+                          : "Nothing to see just yet."}
+                      </p>
+                      <p className="empty-state__copy">
+                        {isAuthenticated
+                          ? "Capture what matters next when the moment arises."
+                          : "Sign in to reveal your calm, focused list."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {filters.map(({ label, value }) => {
-                const isActive = filter === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setFilter(value)}
-                    className={`rounded-md border px-3 py-1 text-xs font-semibold transition ${
-                      isActive
-                        ? "border-accent bg-accent text-accent-foreground shadow-sm"
-                        : "border-border text-foreground-muted hover:bg-surface-hover hover:text-foreground"
+
+            {completedCount > 0 && (
+              <div className="completed-section">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleted((previous) => !previous)}
+                  className="completed-toggle"
+                  aria-expanded={showCompleted}
+                >
+                  <span>Completed ({completedCount})</span>
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    className={`h-4 w-4 transition-transform duration-200 ${
+                      showCompleted ? "rotate-180" : ""
                     }`}
                   >
-                    {label}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={handleClearCompleted}
-                className="rounded-md border border-border px-3 py-1 text-xs font-semibold text-foreground-muted transition hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
-                disabled={isPending}
-              >
-                Clear completed
-              </button>
-            </div>
-          </div>
-        </article>
+                    <path
+                      d="M6 8l4 4 4-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.6"
+                    />
+                  </svg>
+                </button>
 
-        <aside className="flex flex-col gap-4">
-          <div className="rounded-md border border-border bg-background p-4 transition-colors">
-            <p className="text-xs uppercase tracking-wide text-foreground-muted">
-              Theme aware
-            </p>
-            <p className="text-sm text-foreground">
-              Task surfaces adapt to the active theme so the checklist always
-              feels native to the rest of Pandora.
-            </p>
-          </div>
-          <div className="rounded-md border border-border bg-background p-4 transition-colors">
-            <p className="text-xs uppercase tracking-wide text-foreground-muted">
-              Focus friendly
-            </p>
-            <p className="text-sm text-foreground">
-              Use filters to narrow your focus, whether you&apos;re planning or
-              celebrating completed work.
-            </p>
-          </div>
-          <div className="rounded-md border border-dashed border-border bg-background p-4 transition-colors text-sm text-foreground-muted">
-            Every interaction relies on tokens, ensuring consistent spacing,
-            color, and typography across the experience.
-          </div>
-        </aside>
-      </section>
+                {showCompleted && (
+                  <div className="completed-list">
+                    {completedTodos.map(renderTodo)}
+                    <button
+                      type="button"
+                      onClick={handleClearCompleted}
+                      className="completed-clear"
+                      disabled={isPending}
+                    >
+                      Clear completed
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        </section>
+      </div>
     </main>
   );
 }
