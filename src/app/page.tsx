@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  KeyboardEvent,
   useState,
   useEffect,
   useTransition,
@@ -32,7 +33,7 @@ type OptimisticAction =
   | { type: "delete"; id: number }
   | { type: "clearCompleted" };
 
-type BlockId = "todos";
+type BlockId = "todos" | "todoDetails";
 
 type BlockLayout = {
   x: number;
@@ -43,19 +44,33 @@ type BlockLayout = {
 };
 
 type BlockLayouts = Record<BlockId, BlockLayout>;
+type BlockRect = Pick<BlockLayout, "x" | "y" | "width" | "height">;
 
 const STORAGE_KEY = "workspace.layouts.v1";
-const BLOCK_IDS: BlockId[] = ["todos"];
+const BLOCK_IDS: BlockId[] = ["todos", "todoDetails"];
 
-const createDefaultLayouts = (): BlockLayouts => ({
-  todos: {
+const createDefaultLayouts = (): BlockLayouts => {
+  const todosLayout: BlockLayout = {
     x: 48,
     y: 48,
     width: 520,
     height: 660,
     z: 1,
-  },
-});
+  };
+
+  const detailLayout: BlockLayout = {
+    x: todosLayout.x + todosLayout.width + 32,
+    y: todosLayout.y,
+    width: 420,
+    height: 520,
+    z: 2,
+  };
+
+  return {
+    todos: todosLayout,
+    todoDetails: detailLayout,
+  };
+};
 
 const sanitizeLayout = (
   layout: Partial<BlockLayout> | undefined,
@@ -70,6 +85,161 @@ const sanitizeLayout = (
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
+
+const computeDetailBlockPlacement = (
+  todosLayout: BlockLayout,
+  detailLayout: BlockLayout | undefined,
+  canvasRect: DOMRect | null
+): BlockRect => {
+  const gap = 24;
+  const padding = 32;
+  const fallbackWidth =
+    typeof window !== "undefined" ? window.innerWidth : todosLayout.x + todosLayout.width + gap;
+  const fallbackHeight =
+    typeof window !== "undefined" ? window.innerHeight : todosLayout.y + todosLayout.height + gap;
+
+  const containerWidth = canvasRect?.width ?? fallbackWidth;
+  const containerHeight = canvasRect?.height ?? fallbackHeight;
+
+  const minWidth = 320;
+  const minHeight = 420;
+  const effectiveMinWidth = Math.max(
+    Math.min(minWidth, containerWidth - padding * 2),
+    240
+  );
+  const effectiveMinHeight = Math.max(
+    Math.min(minHeight, containerHeight - padding * 2),
+    320
+  );
+
+  const preferredWidth = clamp(
+    detailLayout?.width ?? 420,
+    effectiveMinWidth,
+    Math.max(effectiveMinWidth, containerWidth - padding * 2)
+  );
+  const preferredHeight = clamp(
+    detailLayout?.height ?? 520,
+    effectiveMinHeight,
+    Math.max(effectiveMinHeight, containerHeight - padding * 2)
+  );
+
+  const attemptRight = (): BlockRect | null => {
+    const availableWidth =
+      containerWidth - padding - (todosLayout.x + todosLayout.width + gap);
+    if (availableWidth < effectiveMinWidth) {
+      return null;
+    }
+
+    const width = Math.min(preferredWidth, availableWidth);
+    const x = todosLayout.x + todosLayout.width + gap;
+    const y = clamp(
+      todosLayout.y,
+      padding,
+      containerHeight - preferredHeight - padding
+    );
+    const availableHeight = containerHeight - padding - y;
+    if (availableHeight < effectiveMinHeight) {
+      return null;
+    }
+
+    const height = Math.min(preferredHeight, availableHeight);
+    return { x, y, width, height };
+  };
+
+  const attemptLeft = (): BlockRect | null => {
+    const availableWidth = todosLayout.x - padding - gap;
+    if (availableWidth < effectiveMinWidth) {
+      return null;
+    }
+
+    const width = Math.min(preferredWidth, availableWidth);
+    const x = todosLayout.x - gap - width;
+    const y = clamp(
+      todosLayout.y,
+      padding,
+      containerHeight - preferredHeight - padding
+    );
+    const availableHeight = containerHeight - padding - y;
+    if (availableHeight < effectiveMinHeight) {
+      return null;
+    }
+
+    const height = Math.min(preferredHeight, availableHeight);
+    return { x, y, width, height };
+  };
+
+  const attemptBelow = (): BlockRect | null => {
+    const availableHeight =
+      containerHeight - padding - (todosLayout.y + todosLayout.height + gap);
+    if (availableHeight < effectiveMinHeight) {
+      return null;
+    }
+
+    const height = Math.min(preferredHeight, availableHeight);
+    const y = todosLayout.y + todosLayout.height + gap;
+    const x = clamp(
+      todosLayout.x,
+      padding,
+      containerWidth - preferredWidth - padding
+    );
+    const availableWidth = containerWidth - padding - x;
+    if (availableWidth < effectiveMinWidth) {
+      return null;
+    }
+
+    const width = Math.min(preferredWidth, availableWidth);
+    return { x, y, width, height };
+  };
+
+  const attemptAbove = (): BlockRect | null => {
+    const availableHeight = todosLayout.y - padding - gap;
+    if (availableHeight < effectiveMinHeight) {
+      return null;
+    }
+
+    const height = Math.min(preferredHeight, availableHeight);
+    const y = todosLayout.y - gap - height;
+    const x = clamp(
+      todosLayout.x,
+      padding,
+      containerWidth - preferredWidth - padding
+    );
+    const availableWidth = containerWidth - padding - x;
+    if (availableWidth < effectiveMinWidth) {
+      return null;
+    }
+
+    const width = Math.min(preferredWidth, availableWidth);
+    return { x, y, width, height };
+  };
+
+  const attempts = [attemptRight, attemptLeft, attemptBelow, attemptAbove];
+
+  for (const attempt of attempts) {
+    const placement = attempt();
+    if (placement) {
+      return placement;
+    }
+  }
+
+  const fallbackWidthClamped = clamp(
+    preferredWidth,
+    effectiveMinWidth,
+    Math.max(effectiveMinWidth, containerWidth - padding * 2)
+  );
+  const fallbackHeightClamped = clamp(
+    preferredHeight,
+    effectiveMinHeight,
+    Math.max(effectiveMinHeight, containerHeight - padding * 2)
+  );
+
+  return {
+    x: clamp((containerWidth - fallbackWidthClamped) / 2, padding, Math.max(padding, containerWidth - fallbackWidthClamped - padding)),
+    y: clamp((containerHeight - fallbackHeightClamped) / 2, padding, Math.max(padding, containerHeight - fallbackHeightClamped - padding)),
+    width: fallbackWidthClamped,
+    height: fallbackHeightClamped,
+  };
+};
 
 const computeFocusLayout = (layout: BlockLayout, canvasRect?: DOMRect | null): BlockLayout => {
   const padding = 32;
@@ -155,7 +325,22 @@ export default function Home() {
   const previousLayoutsRef = useRef<Partial<Record<BlockId, BlockLayout>>>({});
   const [blockLayouts, setBlockLayouts] = useState<BlockLayouts>(() => loadLayouts());
   const [focusedBlockId, setFocusedBlockId] = useState<BlockId | null>(null);
+  const [selectedTodoId, setSelectedTodoId] = useState<number | null>(null);
   const todoLayout = blockLayouts.todos;
+  const detailLayout = blockLayouts.todoDetails;
+  const selectedTodo = useMemo(() => {
+    if (selectedTodoId === null) {
+      return null;
+    }
+
+    const match = optimisticTodos.find((todo) => todo.id === selectedTodoId);
+    if (!match || match.done) {
+      return null;
+    }
+
+    return match;
+  }, [optimisticTodos, selectedTodoId]);
+  const isDetailVisible = Boolean(selectedTodo);
 
   const updateLayout = useCallback(
     (id: BlockId, next: Partial<BlockLayout>) => {
@@ -204,16 +389,122 @@ export default function Home() {
     });
   }, []);
 
-  const handleDragStop = useCallback<RndDragCallback>(
+  useEffect(() => {
+    if (selectedTodoId !== null && !selectedTodo) {
+      setSelectedTodoId(null);
+    }
+  }, [selectedTodo, selectedTodoId]);
+
+  useEffect(() => {
+    if (!isDetailVisible) {
+      return;
+    }
+
+    setBlockLayouts((previous) => {
+      const detail = previous.todoDetails;
+      if (!detail) {
+        return previous;
+      }
+
+      const canvasRect = canvasRef.current?.getBoundingClientRect() ?? null;
+      const placement = computeDetailBlockPlacement(previous.todos, detail, canvasRect);
+
+      if (
+        detail.x === placement.x &&
+        detail.y === placement.y &&
+        detail.width === placement.width &&
+        detail.height === placement.height
+      ) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        todoDetails: {
+          ...detail,
+          ...placement,
+        },
+      };
+    });
+  }, [
+    isDetailVisible,
+    todoLayout.height,
+    todoLayout.width,
+    todoLayout.x,
+    todoLayout.y,
+    setBlockLayouts,
+  ]);
+
+  useEffect(() => {
+    if (!isDetailVisible || typeof window === "undefined") {
+      return;
+    }
+
+    const handleResize = () => {
+      setBlockLayouts((previous) => {
+        const detail = previous.todoDetails;
+        if (!detail) {
+          return previous;
+        }
+
+        const canvasRect = canvasRef.current?.getBoundingClientRect() ?? null;
+        const placement = computeDetailBlockPlacement(previous.todos, detail, canvasRect);
+
+        if (
+          detail.x === placement.x &&
+          detail.y === placement.y &&
+          detail.width === placement.width &&
+          detail.height === placement.height
+        ) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+          todoDetails: {
+            ...detail,
+            ...placement,
+          },
+        };
+      });
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isDetailVisible, setBlockLayouts]);
+
+  const handleTodosDragStop = useCallback<RndDragCallback>(
     (_event, data) => {
       updateLayout("todos", { x: data.x, y: data.y });
     },
     [updateLayout]
   );
 
-  const handleResizeStop = useCallback<RndResizeCallback>(
+  const handleDetailsDragStop = useCallback<RndDragCallback>(
+    (_event, data) => {
+      updateLayout("todoDetails", { x: data.x, y: data.y });
+    },
+    [updateLayout]
+  );
+
+  const handleTodosResizeStop = useCallback<RndResizeCallback>(
     (_event, _direction, elementRef, _delta, position) => {
       updateLayout("todos", {
+        width: elementRef.offsetWidth,
+        height: elementRef.offsetHeight,
+        x: position.x,
+        y: position.y,
+      });
+    },
+    [updateLayout]
+  );
+
+  const handleDetailsResizeStop = useCallback<RndResizeCallback>(
+    (_event, _direction, elementRef, _delta, position) => {
+      updateLayout("todoDetails", {
         width: elementRef.offsetWidth,
         height: elementRef.offsetHeight,
         x: position.x,
@@ -285,6 +576,7 @@ export default function Home() {
   }, [blockLayouts, focusedBlockId]);
 
   const isTodoFocused = focusedBlockId === "todos";
+  const isDetailFocused = focusedBlockId === "todoDetails";
 
   const dayFormatter = useMemo(
     () =>
@@ -302,6 +594,15 @@ export default function Home() {
         month: "long",
         day: "numeric",
       }).format(new Date()),
+    []
+  );
+
+  const detailDateTimeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
     []
   );
 
@@ -416,6 +717,36 @@ export default function Home() {
     });
   };
 
+  const handleSelectTodo = useCallback(
+    (todo: OptimisticTodo) => {
+      if (todo.done) {
+        return;
+      }
+
+      const canvasRect = canvasRef.current?.getBoundingClientRect() ?? null;
+      setSelectedTodoId(todo.id);
+      setBlockLayouts((previous) => {
+        const detail = previous.todoDetails;
+        const placement = computeDetailBlockPlacement(previous.todos, detail, canvasRect);
+
+        return {
+          ...previous,
+          todoDetails: {
+            ...detail,
+            ...placement,
+            z: getNextZ(previous),
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const handleCloseDetails = useCallback(() => {
+    setSelectedTodoId(null);
+    setFocusedBlockId((current) => (current === "todoDetails" ? null : current));
+  }, []);
+
   const handleSignOut = async () => {
     setError(null);
     startSignOutTransition(async () => {
@@ -434,18 +765,43 @@ export default function Home() {
   const renderTodo = (todo: OptimisticTodo) => {
     const isCompleted = todo.done;
     const isDisabled = isPending || todo.optimistic;
+    const isSelected = selectedTodo?.id === todo.id;
     const createdAt = new Date(todo.created_at);
     const createdOn = Number.isNaN(createdAt.getTime())
       ? null
       : dayFormatter.format(createdAt);
 
+    const containerClasses = ["todo-item", "group"];
+    if (todo.optimistic) {
+      containerClasses.push("todo-item--optimistic");
+    }
+    if (!isCompleted) {
+      containerClasses.push("todo-item--selectable");
+    }
+    if (isSelected) {
+      containerClasses.push("todo-item--selected");
+    }
+
+    const bodyClasses = ["flex", "flex-1", "flex-col", "gap-1"];
+    if (!isCompleted) {
+      bodyClasses.push("todo-item__body");
+    }
+
+    const handleViewDetails = () => {
+      if (!isCompleted) {
+        handleSelectTodo(todo);
+      }
+    };
+
+    const handleViewDetailsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isCompleted && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        handleViewDetails();
+      }
+    };
+
     return (
-      <div
-        key={todo.id}
-        className={`todo-item group ${
-          todo.optimistic ? "todo-item--optimistic" : ""
-        }`}
-      >
+      <div key={todo.id} className={containerClasses.join(" ")}>
         <button
           type="button"
           onClick={() => handleToggleTodo(todo.id)}
@@ -466,13 +822,23 @@ export default function Home() {
           </svg>
         </button>
 
-        <div className="flex flex-1 flex-col gap-1">
+        <div
+          className={bodyClasses.join(" ")}
+          {...(!isCompleted
+            ? {
+                role: "button",
+                tabIndex: 0,
+                onClick: handleViewDetails,
+                onKeyDown: handleViewDetailsKeyDown,
+                "aria-pressed": isSelected,
+                "aria-label": `View details for ${todo.text}`,
+              }
+            : undefined)}
+        >
           <p className={`todo-text ${isCompleted ? "todo-text--completed" : ""}`}>
             {todo.text}
           </p>
-          {createdOn && (
-            <span className="todo-meta">Added {createdOn}</span>
-          )}
+          {createdOn && <span className="todo-meta">Added {createdOn}</span>}
         </div>
 
         <button
@@ -496,6 +862,20 @@ export default function Home() {
     );
   };
 
+  const detailCreatedAt = selectedTodo ? new Date(selectedTodo.created_at) : null;
+  const detailUpdatedAt = selectedTodo ? new Date(selectedTodo.updated_at) : null;
+  const detailCreatedLabel =
+    detailCreatedAt && !Number.isNaN(detailCreatedAt.getTime())
+      ? detailDateTimeFormatter.format(detailCreatedAt)
+      : null;
+  const detailUpdatedLabel =
+    detailUpdatedAt &&
+    !Number.isNaN(detailUpdatedAt.getTime()) &&
+    detailCreatedAt &&
+    detailUpdatedAt.getTime() !== detailCreatedAt.getTime()
+      ? detailDateTimeFormatter.format(detailUpdatedAt)
+      : null;
+
   return (
     <main className="workspace-root">
       <div ref={canvasRef} className="workspace-canvas">
@@ -517,8 +897,8 @@ export default function Home() {
             topLeft: true,
             topRight: true,
           }}
-          onDragStop={handleDragStop}
-          onResizeStop={handleResizeStop}
+          onDragStop={handleTodosDragStop}
+          onResizeStop={handleTodosResizeStop}
           onMouseDown={() => raiseBlock("todos")}
         >
           <article
@@ -749,6 +1129,147 @@ export default function Home() {
             </section>
           </article>
         </Rnd>
+        {selectedTodo && (
+          <Rnd
+            bounds="parent"
+            size={{ width: detailLayout.width, height: detailLayout.height }}
+            position={{ x: detailLayout.x, y: detailLayout.y }}
+            minWidth={320}
+            minHeight={360}
+            style={{ zIndex: detailLayout.z }}
+            dragHandleClassName="workspace-block__drag-region"
+            enableResizing={{
+              bottom: true,
+              bottomLeft: true,
+              bottomRight: true,
+              left: true,
+              right: true,
+              top: true,
+              topLeft: true,
+              topRight: true,
+            }}
+            onDragStop={handleDetailsDragStop}
+            onResizeStop={handleDetailsResizeStop}
+            onMouseDown={() => raiseBlock("todoDetails")}
+          >
+            <article
+              className={`workspace-block ${
+                isDetailFocused ? "workspace-block--focused" : ""
+              }`}
+              onMouseDownCapture={() => raiseBlock("todoDetails")}
+            >
+              <div className="workspace-block__chrome">
+                <div
+                  className="workspace-block__drag-region"
+                  aria-label="Drag Todo details block"
+                >
+                  <span className="workspace-block__grip">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  <span className="workspace-block__title">Todo Details</span>
+                </div>
+                <div className="workspace-block__actions">
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => toggleFocus("todoDetails")}
+                    className="workspace-block__action"
+                    aria-pressed={isDetailFocused}
+                    aria-label={
+                      isDetailFocused
+                        ? "Exit focus and restore previous size"
+                        : "Focus this block"
+                    }
+                    title={
+                      isDetailFocused
+                        ? "Exit focus and restore previous size"
+                        : "Focus this block"
+                    }
+                  >
+                    {isDetailFocused ? "Exit focus" : "Focus"}
+                  </button>
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={handleCloseDetails}
+                    className="workspace-block__action"
+                    aria-label="Close details block"
+                    title="Close details block"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <section className="workspace-block__content glass-panel">
+                <div className="space-y-6">
+                  <header className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-foreground-muted">
+                      Todo Details
+                    </p>
+                    <h2 className="text-2xl font-semibold leading-tight text-foreground">
+                      {selectedTodo.text}
+                    </h2>
+                  </header>
+
+                  <dl className="space-y-3 text-sm text-foreground-muted">
+                    <div className="flex items-center justify-between gap-4">
+                      <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
+                        Status
+                      </dt>
+                      <dd className="text-sm font-semibold text-foreground">
+                        {selectedTodo.done ? "Completed" : "Active"}
+                      </dd>
+                    </div>
+
+                    {detailCreatedLabel && (
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
+                          Created
+                        </dt>
+                        <dd className="text-sm text-foreground">
+                          {detailCreatedLabel}
+                        </dd>
+                      </div>
+                    )}
+
+                    {detailUpdatedLabel && (
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
+                          Last updated
+                        </dt>
+                        <dd className="text-sm text-foreground">
+                          {detailUpdatedLabel}
+                        </dd>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-4">
+                      <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
+                        Owner
+                      </dt>
+                      <dd className="text-sm text-foreground">
+                        {selectedTodo.user_id || "Unknown"}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div className="todo-detail__summary space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted">
+                      Overview
+                    </h3>
+                    <p className="mt-3 text-sm leading-relaxed text-foreground">
+                      Manage this task from the Todos block. Any updates you apply
+                      there will refresh here automatically.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            </article>
+          </Rnd>
+        )}
       </div>
     </main>
   );

@@ -473,6 +473,27 @@
   opacity: 0.65;
 }
 
+.todo-item--selectable .todo-item__body {
+  cursor: pointer;
+}
+
+.todo-item--selected {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 16px 40px -28px rgba(42, 42, 42, 0.6);
+}
+
+.todo-item__body {
+  outline: none;
+  border-radius: 12px;
+  transition: box-shadow 200ms var(--ease-smooth), transform 200ms var(--ease-smooth);
+}
+
+.todo-item__body:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+  outline: none;
+}
+
 .todo-checkbox {
   display: inline-flex;
   align-items: center;
@@ -517,6 +538,13 @@
 .todo-checkbox--checked svg {
   opacity: 1;
   transform: scale(1);
+}
+
+.todo-detail__summary {
+  padding: 1rem;
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
 }
 
 .todo-text {
