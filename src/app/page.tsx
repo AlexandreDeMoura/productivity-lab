@@ -10,11 +10,10 @@ import {
   useMemo,
   useCallback,
   useRef,
+  ChangeEvent,
 } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
+import type { RndDragCallback, RndResizeCallback } from "react-rnd";
 import {
   getTodos,
   createTodo,
@@ -23,28 +22,21 @@ import {
   clearCompletedTodos,
 } from "@/features/todos/actions/todoActions";
 import { signOut } from "@/features/auth/actions/authActions";
-import type { Todo } from "@/types/database";
-
-type OptimisticTodo = Todo & { optimistic?: boolean };
+import { TodosBlock } from "@/features/todos/components/TodosBlock";
+import { TodoDetailsBlock } from "@/features/todos/components/TodoDetailsBlock";
+import type { OptimisticTodo } from "@/features/todos/types/optimisticTodo";
+import type {
+  BlockId,
+  BlockLayout,
+  BlockLayouts,
+  BlockRect,
+} from "@/features/todos/types/workspace";
 
 type OptimisticAction =
   | { type: "create"; todo: OptimisticTodo }
   | { type: "toggle"; id: number }
   | { type: "delete"; id: number }
   | { type: "clearCompleted" };
-
-type BlockId = "todos" | "todoDetails";
-
-type BlockLayout = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  z: number;
-};
-
-type BlockLayouts = Record<BlockId, BlockLayout>;
-type BlockRect = Pick<BlockLayout, "x" | "y" | "width" | "height">;
 
 const STORAGE_KEY = "workspace.layouts.v1";
 const BLOCK_IDS: BlockId[] = ["todos", "todoDetails"];
@@ -636,8 +628,6 @@ export default function Home() {
     .sort(sortByCreatedAt);
 
   const remaining = activeTodos.length;
-  const completedCount = completedTodos.length;
-
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -675,6 +665,13 @@ export default function Home() {
       }
     });
   };
+
+  const handleNewTodoChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      setNewTodo(event.target.value);
+    },
+    []
+  );
 
   const handleToggleTodo = async (id: number) => {
     setError(null);
@@ -879,397 +876,43 @@ export default function Home() {
   return (
     <main className="workspace-root">
       <div ref={canvasRef} className="workspace-canvas">
-        <Rnd
-          bounds="parent"
-          size={{ width: todoLayout.width, height: todoLayout.height }}
-          position={{ x: todoLayout.x, y: todoLayout.y }}
-          minWidth={360}
-          minHeight={420}
-          style={{ zIndex: todoLayout.z }}
-          dragHandleClassName="workspace-block__drag-region"
-          enableResizing={{
-            bottom: true,
-            bottomLeft: true,
-            bottomRight: true,
-            left: true,
-            right: true,
-            top: true,
-            topLeft: true,
-            topRight: true,
-          }}
+        <TodosBlock
+          layout={todoLayout}
+          isFocused={isTodoFocused}
+          onToggleFocus={() => toggleFocus("todos")}
+          onActivate={() => raiseBlock("todos")}
           onDragStop={handleTodosDragStop}
           onResizeStop={handleTodosResizeStop}
-          onMouseDown={() => raiseBlock("todos")}
-        >
-          <article
-            className={`workspace-block ${
-              isTodoFocused ? "workspace-block--focused" : ""
-            }`}
-            onMouseDownCapture={() => raiseBlock("todos")}
-          >
-            <div className="workspace-block__chrome">
-              <div className="workspace-block__drag-region" aria-label="Drag Todos block">
-                <span className="workspace-block__grip">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                <span className="workspace-block__title">Todos</span>
-              </div>
-              <div className="workspace-block__actions">
-                <button
-                  type="button"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => toggleFocus("todos")}
-                  className="workspace-block__action"
-                  aria-pressed={isTodoFocused}
-                  aria-label={
-                    isTodoFocused
-                      ? "Exit focus and restore previous size"
-                      : "Focus this block"
-                  }
-                  title={
-                    isTodoFocused
-                      ? "Exit focus and restore previous size"
-                      : "Focus this block"
-                  }
-                >
-                  {isTodoFocused ? "Exit focus" : "Focus"}
-                </button>
-              </div>
-            </div>
-
-            <section className="workspace-block__content glass-panel">
-              <header className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
-                <div className="space-y-4">
-                  <div>
-                    <h1 className="text-[28px] font-semibold leading-tight tracking-[0.5px] text-foreground">
-                      Today&apos;s Focus
-                    </h1>
-                    <p className="mt-2 text-sm font-medium tracking-[0.12em] text-foreground-subtle">
-                      {fullDateLabel}
-                    </p>
-                  </div>
-                  <p className="text-sm text-foreground-muted">
-                    {remaining === 0
-                      ? "Your mind is clear. Enjoy the calm."
-                      : `${remaining} ${remaining === 1 ? "task" : "tasks"} waiting patiently.`}
-                  </p>
-                </div>
-
-                {isAuthenticated ? (
-                  <button
-                    onClick={handleSignOut}
-                    className="inline-flex h-10 min-w-[3.5rem] items-center justify-center rounded-full border border-border px-4 text-xs font-semibold cursor-pointer uppercase tracking-[0.2em] text-foreground-muted transition hover:border-accent/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={isSignOutPending}
-                  >
-                    {isSignOutPending ? "Signing out…" : "Sign out"}
-                  </button>
-                ) : (
-                  <div className="text-xs font-medium uppercase tracking-[0.22em] text-foreground-muted">
-                    <Link href="/sign-in" className="transition hover:text-foreground">
-                      Sign in
-                    </Link>
-                    <span className="px-1 text-foreground-subtle">/</span>
-                    <Link href="/sign-up" className="transition hover:text-foreground">
-                      Sign up
-                    </Link>
-                  </div>
-                )}
-              </header>
-
-              <form
-                onSubmit={handleSubmit}
-                className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center"
-              >
-                <div className="input-shell">
-                  <input
-                    value={newTodo}
-                    onChange={(event) => setNewTodo(event.target.value)}
-                    placeholder="Add a gentle reminder…"
-                    className="input-field"
-                    aria-label="New todo"
-                    disabled={isPending || !isAuthenticated}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="accent-button"
-                  disabled={isPending || !isAuthenticated || !newTodo.trim()}
-                >
-                  {isPending ? "Adding…" : <Plus className="h-5 w-5" />}
-                </button>
-              </form>
-
-              {!isAuthenticated && (
-                <p className="mt-3 text-xs font-medium tracking-[0.16em] text-foreground-subtle">
-                  Sign in to start curating your list.
-                </p>
-              )}
-
-              {error && (
-                <div className="notice notice--error">
-                  <p>{error}</p>
-                  {error === "You must be logged in to view todos" && (
-                    <p className="notice__cta">
-                      <Link
-                        className="underline-offset-4 transition hover:text-foreground"
-                        href="/sign-in"
-                      >
-                        Sign in
-                      </Link>{" "}
-                      or{" "}
-                      <Link
-                        className="underline-offset-4 transition hover:text-foreground"
-                        href="/sign-up"
-                      >
-                        create an account
-                      </Link>{" "}
-                      to manage your todos.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <section className="mt-8 space-y-6">
-                <div>
-                  <h2 className="section-title">Active</h2>
-                  <div className="mt-6 space-y-4">
-                    {isLoading ? (
-                      <p className="text-sm text-foreground-subtle">
-                        Loading your tasks…
-                      </p>
-                    ) : activeTodos.length > 0 ? (
-                      activeTodos.map(renderTodo)
-                    ) : (
-                      <div className="empty-state">
-                        <div className="empty-state__icon" aria-hidden="true">
-                          <svg viewBox="0 0 40 40" className="h-10 w-10">
-                            <circle
-                              cx="20"
-                              cy="20"
-                              r="12"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeDasharray="2 4"
-                            />
-                            <path
-                              d="M16 22.5c1.2 1 2.8 1.6 4 1.6 1.2 0 2.8-.6 4-1.6"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              fill="none"
-                            />
-                            <circle cx="17" cy="17" r="1.4" fill="currentColor" />
-                            <circle cx="23" cy="17" r="1.4" fill="currentColor" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="empty-state__title">
-                            {isAuthenticated
-                              ? "Your mind is clear."
-                              : "Nothing to see just yet."}
-                          </p>
-                          <p className="empty-state__copy">
-                            {isAuthenticated
-                              ? "Capture what matters next when the moment arises."
-                              : "Sign in to reveal your calm, focused list."}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {completedCount > 0 && (
-                  <div className="completed-section">
-                    <button
-                      type="button"
-                      onClick={() => setShowCompleted((previous) => !previous)}
-                      className="completed-toggle"
-                      aria-expanded={showCompleted}
-                    >
-                      <span>Completed ({completedCount})</span>
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 20 20"
-                        className={`h-4 w-4 transition-transform duration-200 ${
-                          showCompleted ? "rotate-180" : ""
-                        }`}
-                      >
-                        <path
-                          d="M6 8l4 4 4-4"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="1.6"
-                        />
-                      </svg>
-                    </button>
-
-                    {showCompleted && (
-                      <div className="completed-list">
-                        {completedTodos.map(renderTodo)}
-                        <button
-                          type="button"
-                          onClick={handleClearCompleted}
-                          className="completed-clear"
-                          disabled={isPending}
-                        >
-                          Clear completed
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
-            </section>
-          </article>
-        </Rnd>
-        {selectedTodo && (
-          <Rnd
-            bounds="parent"
-            size={{ width: detailLayout.width, height: detailLayout.height }}
-            position={{ x: detailLayout.x, y: detailLayout.y }}
-            minWidth={320}
-            minHeight={360}
-            style={{ zIndex: detailLayout.z }}
-            dragHandleClassName="workspace-block__drag-region"
-            enableResizing={{
-              bottom: true,
-              bottomLeft: true,
-              bottomRight: true,
-              left: true,
-              right: true,
-              top: true,
-              topLeft: true,
-              topRight: true,
-            }}
-            onDragStop={handleDetailsDragStop}
-            onResizeStop={handleDetailsResizeStop}
-            onMouseDown={() => raiseBlock("todoDetails")}
-          >
-            <article
-              className={`workspace-block ${
-                isDetailFocused ? "workspace-block--focused" : ""
-              }`}
-              onMouseDownCapture={() => raiseBlock("todoDetails")}
-            >
-              <div className="workspace-block__chrome">
-                <div
-                  className="workspace-block__drag-region"
-                  aria-label="Drag Todo details block"
-                >
-                  <span className="workspace-block__grip">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                  <span className="workspace-block__title">Todo Details</span>
-                </div>
-                <div className="workspace-block__actions">
-                  <button
-                    type="button"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => toggleFocus("todoDetails")}
-                    className="workspace-block__action"
-                    aria-pressed={isDetailFocused}
-                    aria-label={
-                      isDetailFocused
-                        ? "Exit focus and restore previous size"
-                        : "Focus this block"
-                    }
-                    title={
-                      isDetailFocused
-                        ? "Exit focus and restore previous size"
-                        : "Focus this block"
-                    }
-                  >
-                    {isDetailFocused ? "Exit focus" : "Focus"}
-                  </button>
-                  <button
-                    type="button"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={handleCloseDetails}
-                    className="workspace-block__action"
-                    aria-label="Close details block"
-                    title="Close details block"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <section className="workspace-block__content glass-panel">
-                <div className="space-y-6">
-                  <header className="space-y-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-foreground-muted">
-                      Todo Details
-                    </p>
-                    <h2 className="text-2xl font-semibold leading-tight text-foreground">
-                      {selectedTodo.text}
-                    </h2>
-                  </header>
-
-                  <dl className="space-y-3 text-sm text-foreground-muted">
-                    <div className="flex items-center justify-between gap-4">
-                      <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                        Status
-                      </dt>
-                      <dd className="text-sm font-semibold text-foreground">
-                        {selectedTodo.done ? "Completed" : "Active"}
-                      </dd>
-                    </div>
-
-                    {detailCreatedLabel && (
-                      <div className="flex items-center justify-between gap-4">
-                        <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                          Created
-                        </dt>
-                        <dd className="text-sm text-foreground">
-                          {detailCreatedLabel}
-                        </dd>
-                      </div>
-                    )}
-
-                    {detailUpdatedLabel && (
-                      <div className="flex items-center justify-between gap-4">
-                        <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                          Last updated
-                        </dt>
-                        <dd className="text-sm text-foreground">
-                          {detailUpdatedLabel}
-                        </dd>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between gap-4">
-                      <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                        Owner
-                      </dt>
-                      <dd className="text-sm text-foreground">
-                        {selectedTodo.user_id || "Unknown"}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <div className="todo-detail__summary space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted">
-                      Overview
-                    </h3>
-                    <p className="mt-3 text-sm leading-relaxed text-foreground">
-                      Manage this task from the Todos block. Any updates you apply
-                      there will refresh here automatically.
-                    </p>
-                  </div>
-                </div>
-              </section>
-            </article>
-          </Rnd>
-        )}
+          remainingCount={remaining}
+          fullDateLabel={fullDateLabel}
+          isAuthenticated={isAuthenticated}
+          isSignOutPending={isSignOutPending}
+          onSignOut={handleSignOut}
+          onSubmit={handleSubmit}
+          newTodoValue={newTodo}
+          onNewTodoChange={handleNewTodoChange}
+          isPending={isPending}
+          isLoading={isLoading}
+          error={error}
+          activeTodos={activeTodos}
+          completedTodos={completedTodos}
+          renderTodo={renderTodo}
+          showCompleted={showCompleted}
+          onToggleShowCompleted={() => setShowCompleted((previous) => !previous)}
+          onClearCompleted={handleClearCompleted}
+        />
+        <TodoDetailsBlock
+          layout={detailLayout}
+          selectedTodo={selectedTodo}
+          isFocused={isDetailFocused}
+          onToggleFocus={() => toggleFocus("todoDetails")}
+          onActivate={() => raiseBlock("todoDetails")}
+          onClose={handleCloseDetails}
+          onDragStop={handleDetailsDragStop}
+          onResizeStop={handleDetailsResizeStop}
+          createdLabel={detailCreatedLabel}
+          updatedLabel={detailUpdatedLabel}
+        />
       </div>
     </main>
   );
