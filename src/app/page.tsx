@@ -7,10 +7,13 @@ import {
   useTransition,
   useOptimistic,
   useMemo,
+  useCallback,
+  useRef,
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
 import {
   getTodos,
   createTodo,
@@ -28,6 +31,94 @@ type OptimisticAction =
   | { type: "toggle"; id: number }
   | { type: "delete"; id: number }
   | { type: "clearCompleted" };
+
+type BlockId = "todos";
+
+type BlockLayout = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z: number;
+};
+
+type BlockLayouts = Record<BlockId, BlockLayout>;
+
+const STORAGE_KEY = "workspace.layouts.v1";
+const BLOCK_IDS: BlockId[] = ["todos"];
+
+const createDefaultLayouts = (): BlockLayouts => ({
+  todos: {
+    x: 48,
+    y: 48,
+    width: 520,
+    height: 660,
+    z: 1,
+  },
+});
+
+const sanitizeLayout = (
+  layout: Partial<BlockLayout> | undefined,
+  fallback: BlockLayout
+): BlockLayout => ({
+  x: typeof layout?.x === "number" ? layout.x : fallback.x,
+  y: typeof layout?.y === "number" ? layout.y : fallback.y,
+  width: typeof layout?.width === "number" ? layout.width : fallback.width,
+  height: typeof layout?.height === "number" ? layout.height : fallback.height,
+  z: typeof layout?.z === "number" ? layout.z : fallback.z,
+});
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const computeFocusLayout = (layout: BlockLayout, canvasRect?: DOMRect | null): BlockLayout => {
+  const padding = 32;
+  const containerWidth = canvasRect?.width ?? window.innerWidth;
+  const containerHeight = canvasRect?.height ?? window.innerHeight;
+  const maxWidth = Math.max(420, containerWidth - padding * 2);
+  const maxHeight = Math.max(480, containerHeight - padding * 2);
+  const width = Math.min(Math.max(layout.width, 520), maxWidth);
+  const height = Math.min(Math.max(layout.height, 580), maxHeight);
+  const maxX = Math.max(padding, containerWidth - width - padding);
+  const maxY = Math.max(padding, containerHeight - height - padding);
+
+  return {
+    ...layout,
+    width,
+    height,
+    x: clamp((containerWidth - width) / 2, padding, maxX),
+    y: clamp((containerHeight - height) / 2, padding, maxY),
+  };
+};
+
+const loadLayouts = (): BlockLayouts => {
+  const defaults = createDefaultLayouts();
+
+  if (typeof window === "undefined") {
+    return defaults;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return defaults;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<Record<BlockId, Partial<BlockLayout>>>;
+    const result: BlockLayouts = { ...defaults };
+
+    for (const blockId of BLOCK_IDS) {
+      result[blockId] = sanitizeLayout(parsed?.[blockId], defaults[blockId]);
+    }
+
+    return result;
+  } catch {
+    return defaults;
+  }
+};
+
+const getNextZ = (layouts: BlockLayouts) =>
+  Object.values(layouts).reduce((highest, current) => Math.max(highest, current.z), 0) + 1;
 
 export default function Home() {
   const [todos, setTodos] = useState<OptimisticTodo[]>([]);
@@ -60,6 +151,140 @@ export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const router = useRouter();
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const previousLayoutsRef = useRef<Partial<Record<BlockId, BlockLayout>>>({});
+  const [blockLayouts, setBlockLayouts] = useState<BlockLayouts>(() => loadLayouts());
+  const [focusedBlockId, setFocusedBlockId] = useState<BlockId | null>(null);
+  const todoLayout = blockLayouts.todos;
+
+  const updateLayout = useCallback(
+    (id: BlockId, next: Partial<BlockLayout>) => {
+      setBlockLayouts((previous) => {
+        const layout = previous[id];
+        if (!layout) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+          [id]: {
+            ...layout,
+            ...next,
+            z: getNextZ(previous),
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const raiseBlock = useCallback((id: BlockId) => {
+    setBlockLayouts((previous) => {
+      const layout = previous[id];
+      if (!layout) {
+        return previous;
+      }
+
+      const highest = Object.values(previous).reduce(
+        (maxValue, current) => Math.max(maxValue, current.z),
+        0
+      );
+
+      if (layout.z === highest) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [id]: {
+          ...layout,
+          z: highest + 1,
+        },
+      };
+    });
+  }, []);
+
+  const handleDragStop = useCallback<RndDragCallback>(
+    (_event, data) => {
+      updateLayout("todos", { x: data.x, y: data.y });
+    },
+    [updateLayout]
+  );
+
+  const handleResizeStop = useCallback<RndResizeCallback>(
+    (_event, _direction, elementRef, _delta, position) => {
+      updateLayout("todos", {
+        width: elementRef.offsetWidth,
+        height: elementRef.offsetHeight,
+        x: position.x,
+        y: position.y,
+      });
+    },
+    [updateLayout]
+  );
+
+  const toggleFocus = useCallback(
+    (id: BlockId) => {
+      if (focusedBlockId === id) {
+        const storedLayout = previousLayoutsRef.current[id];
+
+        setBlockLayouts((previous) => {
+          const layout = previous[id];
+          if (!layout) {
+            return previous;
+          }
+
+          const restored = storedLayout ? { ...storedLayout } : layout;
+          delete previousLayoutsRef.current[id];
+
+          return {
+            ...previous,
+            [id]: {
+              ...restored,
+              z: getNextZ(previous),
+            },
+          };
+        });
+
+        setFocusedBlockId(null);
+        return;
+      }
+
+      const canvasRect = canvasRef.current?.getBoundingClientRect() ?? null;
+
+      setBlockLayouts((previous) => {
+        const layout = previous[id];
+        if (!layout) {
+          return previous;
+        }
+
+        previousLayoutsRef.current[id] = { ...layout };
+
+        const focusedLayout = computeFocusLayout(layout, canvasRect);
+
+        return {
+          ...previous,
+          [id]: {
+            ...focusedLayout,
+            z: getNextZ(previous),
+          },
+        };
+      });
+
+      setFocusedBlockId(id);
+    },
+    [focusedBlockId]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || focusedBlockId) {
+      return;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(blockLayouts));
+  }, [blockLayouts, focusedBlockId]);
+
+  const isTodoFocused = focusedBlockId === "todos";
 
   const dayFormatter = useMemo(
     () =>
@@ -272,199 +497,261 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen justify-center bg-background px-4 py-16 sm:px-6 sm:py-24">
-      <div className="w-full max-w-[40rem]">
-        <section className="glass-panel">
-          <header className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-4">
-              <p className="text-[13px] font-medium uppercase tracking-[0.32em] text-foreground-muted">
-                Calm Productivity
-              </p>
-              <div>
-                <h1 className="text-[28px] font-semibold leading-tight tracking-[0.5px] text-foreground">
-                  Today&apos;s Focus
-                </h1>
-                <p className="mt-2 text-sm font-medium tracking-[0.12em] text-foreground-subtle">
-                  {fullDateLabel}
-                </p>
-              </div>
-              <p className="text-sm text-foreground-muted">
-                {remaining === 0
-                  ? "Your mind is clear. Enjoy the calm."
-                  : `${remaining} ${remaining === 1 ? "task" : "tasks"} waiting patiently.`}
-              </p>
-            </div>
-
-            {isAuthenticated ? (
-              <button
-                onClick={handleSignOut}
-                className="inline-flex h-10 min-w-[3.5rem] items-center justify-center rounded-full border border-border px-4 text-xs font-semibold cursor-pointer uppercase tracking-[0.2em] text-foreground-muted transition hover:border-accent/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSignOutPending}
-              >
-                {isSignOutPending ? "Signing out…" : "Sign out"}
-              </button>
-            ) : (
-              <div className="text-xs font-medium uppercase tracking-[0.22em] text-foreground-muted">
-                <Link href="/sign-in" className="transition hover:text-foreground">
-                  Sign in
-                </Link>
-                <span className="px-1 text-foreground-subtle">/</span>
-                <Link href="/sign-up" className="transition hover:text-foreground">
-                  Sign up
-                </Link>
-              </div>
-            )}
-          </header>
-
-          <form
-            onSubmit={handleSubmit}
-            className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center"
+    <main className="workspace-root">
+      <div ref={canvasRef} className="workspace-canvas">
+        <Rnd
+          bounds="parent"
+          size={{ width: todoLayout.width, height: todoLayout.height }}
+          position={{ x: todoLayout.x, y: todoLayout.y }}
+          minWidth={360}
+          minHeight={420}
+          style={{ zIndex: todoLayout.z }}
+          dragHandleClassName="workspace-block__drag-region"
+          enableResizing={{
+            bottom: true,
+            bottomLeft: true,
+            bottomRight: true,
+            left: true,
+            right: true,
+            top: true,
+            topLeft: true,
+            topRight: true,
+          }}
+          onDragStop={handleDragStop}
+          onResizeStop={handleResizeStop}
+          onMouseDown={() => raiseBlock("todos")}
+        >
+          <article
+            className={`workspace-block ${
+              isTodoFocused ? "workspace-block--focused" : ""
+            }`}
+            onMouseDownCapture={() => raiseBlock("todos")}
           >
-            <div className="input-shell">
-              <input
-                value={newTodo}
-                onChange={(event) => setNewTodo(event.target.value)}
-                placeholder="Add a gentle reminder…"
-                className="input-field"
-                aria-label="New todo"
-                disabled={isPending || !isAuthenticated}
-              />
-            </div>
-            <button
-              type="submit"
-              className="accent-button"
-              disabled={isPending || !isAuthenticated || !newTodo.trim()}
-            >
-              {isPending ? "Adding…" : <Plus className="h-5 w-5" />}
-            </button>
-          </form>
-
-          {!isAuthenticated && (
-            <p className="mt-3 text-xs font-medium tracking-[0.16em] text-foreground-subtle">
-              Sign in to start curating your list.
-            </p>
-          )}
-
-          {error && (
-            <div className="notice notice--error">
-              <p>{error}</p>
-              {error === "You must be logged in to view todos" && (
-                <p className="notice__cta">
-                  <Link
-                    className="underline-offset-4 transition hover:text-foreground"
-                    href="/sign-in"
-                  >
-                    Sign in
-                  </Link>{" "}
-                  or{" "}
-                  <Link
-                    className="underline-offset-4 transition hover:text-foreground"
-                    href="/sign-up"
-                  >
-                    create an account
-                  </Link>{" "}
-                  to manage your todos.
-                </p>
-              )}
-            </div>
-          )}
-
-          <section className="mt-12 space-y-8">
-            <div>
-              <h2 className="section-title">Active</h2>
-              <div className="mt-6 space-y-4">
-                {isLoading ? (
-                  <p className="text-sm text-foreground-subtle">
-                    Loading your tasks…
-                  </p>
-                ) : activeTodos.length > 0 ? (
-                  activeTodos.map(renderTodo)
-                ) : (
-                  <div className="empty-state">
-                    <div className="empty-state__icon" aria-hidden="true">
-                      <svg viewBox="0 0 40 40" className="h-10 w-10">
-                        <circle
-                          cx="20"
-                          cy="20"
-                          r="12"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeDasharray="2 4"
-                        />
-                        <path
-                          d="M16 22.5c1.2 1 2.8 1.6 4 1.6 1.2 0 2.8-.6 4-1.6"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                        <circle cx="17" cy="17" r="1.4" fill="currentColor" />
-                        <circle cx="23" cy="17" r="1.4" fill="currentColor" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="empty-state__title">
-                        {isAuthenticated
-                          ? "Your mind is clear."
-                          : "Nothing to see just yet."}
-                      </p>
-                      <p className="empty-state__copy">
-                        {isAuthenticated
-                          ? "Capture what matters next when the moment arises."
-                          : "Sign in to reveal your calm, focused list."}
-                      </p>
-                    </div>
-                  </div>
-                )}
+            <div className="workspace-block__chrome">
+              <div className="workspace-block__drag-region" aria-label="Drag Todos block">
+                <span className="workspace-block__grip">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span className="workspace-block__title">Todos</span>
               </div>
-            </div>
-
-            {completedCount > 0 && (
-              <div className="completed-section">
+              <div className="workspace-block__actions">
                 <button
                   type="button"
-                  onClick={() => setShowCompleted((previous) => !previous)}
-                  className="completed-toggle"
-                  aria-expanded={showCompleted}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => toggleFocus("todos")}
+                  className="workspace-block__action"
+                  aria-pressed={isTodoFocused}
+                  aria-label={
+                    isTodoFocused
+                      ? "Exit focus and restore previous size"
+                      : "Focus this block"
+                  }
+                  title={
+                    isTodoFocused
+                      ? "Exit focus and restore previous size"
+                      : "Focus this block"
+                  }
                 >
-                  <span>Completed ({completedCount})</span>
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 20 20"
-                    className={`h-4 w-4 transition-transform duration-200 ${
-                      showCompleted ? "rotate-180" : ""
-                    }`}
-                  >
-                    <path
-                      d="M6 8l4 4 4-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.6"
-                    />
-                  </svg>
+                  {isTodoFocused ? "Exit focus" : "Focus"}
                 </button>
+              </div>
+            </div>
 
-                {showCompleted && (
-                  <div className="completed-list">
-                    {completedTodos.map(renderTodo)}
-                    <button
-                      type="button"
-                      onClick={handleClearCompleted}
-                      className="completed-clear"
-                      disabled={isPending}
-                    >
-                      Clear completed
-                    </button>
+            <section className="workspace-block__content glass-panel">
+              <header className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-4">
+                  <p className="text-[13px] font-medium uppercase tracking-[0.32em] text-foreground-muted">
+                    Calm Productivity
+                  </p>
+                  <div>
+                    <h1 className="text-[28px] font-semibold leading-tight tracking-[0.5px] text-foreground">
+                      Today&apos;s Focus
+                    </h1>
+                    <p className="mt-2 text-sm font-medium tracking-[0.12em] text-foreground-subtle">
+                      {fullDateLabel}
+                    </p>
+                  </div>
+                  <p className="text-sm text-foreground-muted">
+                    {remaining === 0
+                      ? "Your mind is clear. Enjoy the calm."
+                      : `${remaining} ${remaining === 1 ? "task" : "tasks"} waiting patiently.`}
+                  </p>
+                </div>
+
+                {isAuthenticated ? (
+                  <button
+                    onClick={handleSignOut}
+                    className="inline-flex h-10 min-w-[3.5rem] items-center justify-center rounded-full border border-border px-4 text-xs font-semibold cursor-pointer uppercase tracking-[0.2em] text-foreground-muted transition hover:border-accent/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isSignOutPending}
+                  >
+                    {isSignOutPending ? "Signing out…" : "Sign out"}
+                  </button>
+                ) : (
+                  <div className="text-xs font-medium uppercase tracking-[0.22em] text-foreground-muted">
+                    <Link href="/sign-in" className="transition hover:text-foreground">
+                      Sign in
+                    </Link>
+                    <span className="px-1 text-foreground-subtle">/</span>
+                    <Link href="/sign-up" className="transition hover:text-foreground">
+                      Sign up
+                    </Link>
                   </div>
                 )}
-              </div>
-            )}
-          </section>
-        </section>
+              </header>
+
+              <form
+                onSubmit={handleSubmit}
+                className="mt-12 flex flex-col gap-3 sm:flex-row sm:items-center"
+              >
+                <div className="input-shell">
+                  <input
+                    value={newTodo}
+                    onChange={(event) => setNewTodo(event.target.value)}
+                    placeholder="Add a gentle reminder…"
+                    className="input-field"
+                    aria-label="New todo"
+                    disabled={isPending || !isAuthenticated}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="accent-button"
+                  disabled={isPending || !isAuthenticated || !newTodo.trim()}
+                >
+                  {isPending ? "Adding…" : <Plus className="h-5 w-5" />}
+                </button>
+              </form>
+
+              {!isAuthenticated && (
+                <p className="mt-3 text-xs font-medium tracking-[0.16em] text-foreground-subtle">
+                  Sign in to start curating your list.
+                </p>
+              )}
+
+              {error && (
+                <div className="notice notice--error">
+                  <p>{error}</p>
+                  {error === "You must be logged in to view todos" && (
+                    <p className="notice__cta">
+                      <Link
+                        className="underline-offset-4 transition hover:text-foreground"
+                        href="/sign-in"
+                      >
+                        Sign in
+                      </Link>{" "}
+                      or{" "}
+                      <Link
+                        className="underline-offset-4 transition hover:text-foreground"
+                        href="/sign-up"
+                      >
+                        create an account
+                      </Link>{" "}
+                      to manage your todos.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <section className="mt-12 space-y-8">
+                <div>
+                  <h2 className="section-title">Active</h2>
+                  <div className="mt-6 space-y-4">
+                    {isLoading ? (
+                      <p className="text-sm text-foreground-subtle">
+                        Loading your tasks…
+                      </p>
+                    ) : activeTodos.length > 0 ? (
+                      activeTodos.map(renderTodo)
+                    ) : (
+                      <div className="empty-state">
+                        <div className="empty-state__icon" aria-hidden="true">
+                          <svg viewBox="0 0 40 40" className="h-10 w-10">
+                            <circle
+                              cx="20"
+                              cy="20"
+                              r="12"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeDasharray="2 4"
+                            />
+                            <path
+                              d="M16 22.5c1.2 1 2.8 1.6 4 1.6 1.2 0 2.8-.6 4-1.6"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              fill="none"
+                            />
+                            <circle cx="17" cy="17" r="1.4" fill="currentColor" />
+                            <circle cx="23" cy="17" r="1.4" fill="currentColor" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="empty-state__title">
+                            {isAuthenticated
+                              ? "Your mind is clear."
+                              : "Nothing to see just yet."}
+                          </p>
+                          <p className="empty-state__copy">
+                            {isAuthenticated
+                              ? "Capture what matters next when the moment arises."
+                              : "Sign in to reveal your calm, focused list."}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {completedCount > 0 && (
+                  <div className="completed-section">
+                    <button
+                      type="button"
+                      onClick={() => setShowCompleted((previous) => !previous)}
+                      className="completed-toggle"
+                      aria-expanded={showCompleted}
+                    >
+                      <span>Completed ({completedCount})</span>
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 20 20"
+                        className={`h-4 w-4 transition-transform duration-200 ${
+                          showCompleted ? "rotate-180" : ""
+                        }`}
+                      >
+                        <path
+                          d="M6 8l4 4 4-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                      </svg>
+                    </button>
+
+                    {showCompleted && (
+                      <div className="completed-list">
+                        {completedTodos.map(renderTodo)}
+                        <button
+                          type="button"
+                          onClick={handleClearCompleted}
+                          className="completed-clear"
+                          disabled={isPending}
+                        >
+                          Clear completed
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            </section>
+          </article>
+        </Rnd>
       </div>
     </main>
   );
