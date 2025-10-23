@@ -1,36 +1,152 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Productivity Lab
 
-## Getting Started
+A modern, full-stack todo application featuring a unique draggable, resizable block-based interface. Built with Next.js 15, React 19, and Supabase.
 
-First, run the development server:
+## ✨ Features
+
+- **Draggable & Resizable Blocks**: Todos and details appear in movable, resizable windows with smart positioning
+- **Optimistic UI Updates**: Instant feedback with optimistic updates using React's `useOptimistic` hook
+- **Real-time Authentication**: Secure user authentication powered by Supabase Auth
+- **Focus Mode**: Maximize any block for distraction-free viewing
+- **Persistent Layouts**: Block positions and sizes are saved to localStorage
+- **Smart Block Positioning**: Automatic intelligent placement of detail blocks relative to main todos
+- **Responsive Design**: Mobile-first design with Tailwind CSS 4
+- **Type-safe**: Strict TypeScript throughout with Zod validation
+
+## 🚀 Tech Stack
+
+- **Framework**: Next.js 15.5.5 (App Router + Turbopack)
+- **UI**: React 19, Tailwind CSS 4
+- **Backend**: PostgreSQL via Supabase
+- **Auth**: Supabase Auth
+- **Validation**: Zod schemas
+- **Testing**: Jest + React Testing Library
+- **Type Safety**: TypeScript (strict mode)
+- **Icons**: Lucide React
+- **Interactions**: react-rnd for drag & resize
+
+
+## 🛠️ Getting Started
+
+### Prerequisites
+
+- Node.js 20+ (recommended)
+- npm, yarn, pnpm, or bun
+- Supabase account
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd productivity-lab
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
+
+3. **Set up environment variables**
+   
+   Create a `.env.local` file in the root:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+4. **Set up the database**
+   
+   Run the migrations in your Supabase project:
+   ```bash
+   # Apply migrations to your Supabase instance
+   # Located in supabase/migrations/
+   ```
+
+5. **Run the development server**
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   ```
+
+6. **Open your browser**
+   
+   Navigate to [http://localhost:3000](http://localhost:3000)
+
+
+## 🧪 Testing
 
 ```bash
-npm run dev
+npm run test
 # or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+yarn test
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Tests are co-located with source files and use Jest + React Testing Library.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📝 Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` - Start development server with Turbopack
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run ESLint
+- `npm run test` - Run Jest tests
 
-## Learn More
+## 🎨 Code Style & Patterns
 
-To learn more about Next.js, take a look at the following resources:
+- **Functional Components**: Arrow functions with named exports
+- **TypeScript**: Explicit types, strict mode, no `any`
+- **Server Actions**: Located in `actions/` folders with Zod validation
+- **State Management**: 
+  - React Query for server state
+  - useState/Context for local state
+  - Optimistic updates for instant UI feedback
+- **Styling**: Tailwind utilities (avoiding `@apply`)
+- **File Naming**: 
+  - PascalCase for components
+  - camelCase for utils/actions
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🔑 Key Features Explained
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Draggable Blocks
 
-## Deploy on Vercel
+Todos and details appear in floating, draggable windows using `react-rnd`. Each block maintains its position and size in localStorage.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Smart Positioning
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+When a todo is selected, the detail block automatically positions itself:
+1. First tries to the right of the todos block
+2. Falls back to left, below, or above if space is insufficient
+3. Centers as a last resort
+
+### Focus Mode
+
+Click the maximize button to enter focus mode, which:
+- Centers and enlarges the block
+- Stores the previous layout
+- Restores position when exiting
+
+### Optimistic Updates
+
+All mutations (create, toggle, delete) use optimistic updates for instant feedback, then reconcile with server responses.
+
+## 🚀 Deployment
+
+Deploy to Vercel (recommended):
+
+```bash
+# Install Vercel CLI
+npm i -g vercel
+
+# Deploy
+vercel
+```
+
+Add your Supabase environment variables in the Vercel dashboard.
+
+## 🤝 Contributing
+
+This is a personal project. Contributions are not currently accepted.
