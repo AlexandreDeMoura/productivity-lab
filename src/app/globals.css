@@ -248,6 +248,7 @@
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
+  cursor: pointer;
   letter-spacing: 0.2em;
   transition: border-color 200ms var(--ease-smooth), background 200ms var(--ease-smooth),
     color 200ms var(--ease-smooth), box-shadow 200ms var(--ease-smooth);
