@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
 
 import type { BlockLayout } from "@/features/todos/types/workspace";
@@ -16,6 +23,7 @@ type TodoDetailsBlockProps = {
   onResizeStop: RndResizeCallback;
   createdLabel: string | null;
   updatedLabel: string | null;
+  onUpdateDescription: (id: number, description: string) => Promise<boolean>;
 };
 
 export function TodoDetailsBlock({
@@ -29,10 +37,98 @@ export function TodoDetailsBlock({
   onResizeStop,
   createdLabel,
   updatedLabel,
+  onUpdateDescription,
 }: TodoDetailsBlockProps) {
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const lastTodoIdRef = useRef<number | null>(null);
+  const selectedTodoId = selectedTodo?.id ?? null;
+  const selectedTodoDescription = selectedTodo?.description ?? null;
+
+  useEffect(() => {
+    if (selectedTodoId === null) {
+      setDescriptionDraft("");
+      setIsDirty(false);
+      setIsSubmitting(false);
+      lastTodoIdRef.current = null;
+      return;
+    }
+
+    const nextValue = selectedTodoDescription ?? "";
+    if (lastTodoIdRef.current !== selectedTodoId) {
+      lastTodoIdRef.current = selectedTodoId;
+      setDescriptionDraft(nextValue);
+      setIsDirty(false);
+      setIsSubmitting(false);
+      return;
+    }
+
+    setDescriptionDraft((current) => {
+      if (isDirty) {
+        return current;
+      }
+      if (current === nextValue) {
+        return current;
+      }
+      return nextValue;
+    });
+  }, [selectedTodoId, selectedTodoDescription, isDirty]);
+
   if (!selectedTodo) {
     return null;
   }
+
+  const normalizedCurrentDescription = (selectedTodo.description ?? "").trim();
+  const hasSavedDescription = normalizedCurrentDescription.length > 0;
+  const helperText = isSubmitting
+    ? "Saving description…"
+    : isDirty
+      ? "You have unsaved changes."
+      : hasSavedDescription
+        ? "Description saved."
+        : "No description yet. Add more context above.";
+
+  const handleDescriptionChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = event.target.value;
+    setDescriptionDraft(nextValue);
+
+    const nextNormalized = nextValue.trim();
+    setIsDirty(nextNormalized !== normalizedCurrentDescription);
+  };
+
+  const handleDescriptionReset = () => {
+    setDescriptionDraft(selectedTodo.description ?? "");
+    setIsDirty(false);
+  };
+
+  const handleDescriptionSubmit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+    const draftBeforeSubmit = descriptionDraft;
+    const nextNormalized = draftBeforeSubmit.trim();
+
+    if (nextNormalized === normalizedCurrentDescription) {
+      setDescriptionDraft(selectedTodo.description ?? "");
+      setIsDirty(false);
+      return;
+    }
+
+    setDescriptionDraft(nextNormalized);
+    setIsSubmitting(true);
+    const didSucceed = await onUpdateDescription(
+      selectedTodo.id,
+      draftBeforeSubmit
+    );
+    setIsSubmitting(false);
+
+    if (didSucceed) {
+      setIsDirty(false);
+    } else {
+      setIsDirty(true);
+    }
+  };
 
   return (
     <Rnd
@@ -159,12 +255,39 @@ export function TodoDetailsBlock({
 
             <div className="todo-detail__summary space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted">
-                Overview
+                Description
               </h3>
-              <p className="mt-3 text-sm leading-relaxed text-foreground">
-                Manage this task from the Todos block. Any updates you apply
-                there will refresh here automatically.
-              </p>
+              <form onSubmit={handleDescriptionSubmit} className="space-y-3">
+                <textarea
+                  value={descriptionDraft}
+                  onChange={handleDescriptionChange}
+                  placeholder="Add more context or next steps…"
+                  className="w-full min-h-[140px] resize-none rounded-2xl border border-border bg-surface/80 px-4 py-3 text-sm leading-relaxed text-foreground shadow-[var(--shadow-soft)] transition focus:border-accent focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isSubmitting}
+                />
+                <div className="flex flex-col gap-2 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
+                  <p className="leading-5">{helperText}</p>
+                  <div className="flex items-center gap-2">
+                    {isDirty && (
+                      <button
+                        type="button"
+                        onClick={handleDescriptionReset}
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isSubmitting}
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={!isDirty || isSubmitting}
+                    >
+                      {isSubmitting ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
           </div>
         </section>

@@ -77,6 +77,7 @@
  * 
  * Business Rules:
  * - text cannot be empty (not null)
+ * - description can store extended details but remains optional
  * - done defaults to false for new todos
  * - created_at is set automatically on insert
  * - updated_at is updated automatically on any change
@@ -88,6 +89,9 @@ create table public.todos (
   
   -- Task description
   text text not null,
+
+  -- Optional extended details
+  description text,
   
   -- Completion status
   done boolean not null default false,
@@ -104,6 +108,7 @@ create table public.todos (
 comment on table public.todos is 'User todo items with completion tracking. Each todo belongs to a user and tracks its completion status.';
 comment on column public.todos.id is 'Unique identifier for the todo item';
 comment on column public.todos.text is 'The todo item description or task name';
+comment on column public.todos.description is 'Extended description for the todo item';
 comment on column public.todos.done is 'Whether the todo item has been completed';
 comment on column public.todos.user_id is 'Reference to the user who owns this todo';
 comment on column public.todos.created_at is 'Timestamp when the todo was created';
@@ -314,6 +319,7 @@ create trigger set_updated_at
 export type Todo = {
   id: number;
   text: string;
+  description: string | null;
   done: boolean;
   user_id: string;
   created_at: string;
@@ -322,12 +328,14 @@ export type Todo = {
 
 export type TodoInsert = {
   text: string;
+  description?: string | null;
   user_id: string;
   done?: boolean;
 };
 
 export type TodoUpdate = {
   text?: string;
+  description?: string | null;
   done?: boolean;
 };
 

@@ -20,6 +20,7 @@ import {
   toggleTodo,
   deleteTodo,
   clearCompletedTodos,
+  updateTodoDescription,
 } from "@/features/todos/actions/todoActions";
 import { signOut } from "@/features/auth/actions/authActions";
 import { TodosBlock } from "@/features/todos/components/TodosBlock";
@@ -36,7 +37,8 @@ type OptimisticAction =
   | { type: "create"; todo: OptimisticTodo }
   | { type: "toggle"; id: number }
   | { type: "delete"; id: number }
-  | { type: "clearCompleted" };
+  | { type: "clearCompleted" }
+  | { type: "updateDescription"; id: number; description: string | null };
 
 const STORAGE_KEY = "workspace.layouts.v1";
 const BLOCK_IDS: BlockId[] = ["todos", "todoDetails"];
@@ -301,6 +303,17 @@ export default function Home() {
         return currentTodos.filter((todo) => todo.id !== action.id);
       case "clearCompleted":
         return currentTodos.filter((todo) => !todo.done);
+      case "updateDescription":
+        return currentTodos.map((todo) =>
+          todo.id === action.id
+            ? {
+                ...todo,
+                description: action.description,
+                optimistic: true,
+                updated_at: new Date().toISOString(),
+              }
+            : todo
+        );
       default:
         return currentTodos;
     }
@@ -647,6 +660,7 @@ export default function Home() {
     const optimisticTodo: OptimisticTodo = {
       id: tempId,
       text: value,
+      description: null,
       done: false,
       user_id: "optimistic",
       created_at: now,
@@ -713,6 +727,52 @@ export default function Home() {
       }
     });
   };
+
+  const handleUpdateDescription = useCallback(
+    (id: number, nextDescription: string): Promise<boolean> => {
+      if (!isAuthenticated) {
+        setError("Please sign in to update description");
+        return Promise.resolve(false);
+      }
+
+      const trimmed = nextDescription.trim();
+      const descriptionValue = trimmed.length === 0 ? null : trimmed;
+
+      setError(null);
+      return new Promise<boolean>((resolve) => {
+        startTransition(async () => {
+          let didSucceed = false;
+          try {
+            updateOptimisticTodos({
+              type: "updateDescription",
+              id,
+              description: descriptionValue,
+            });
+
+            const result = await updateTodoDescription({
+              id,
+              description: descriptionValue,
+            });
+
+            if (result.success && result.data) {
+              setTodos((previous) =>
+                previous.map((todo) => (todo.id === id ? result.data! : todo))
+              );
+              didSucceed = true;
+            } else {
+              setError(result.error || "Failed to update description");
+            }
+          } catch (error) {
+            console.error("Unexpected error updating description:", error);
+            setError("An unexpected error occurred");
+          } finally {
+            resolve(didSucceed);
+          }
+        });
+      });
+    },
+    [isAuthenticated, startTransition, updateOptimisticTodos, setError, setTodos]
+  );
 
   const handleSelectTodo = useCallback(
     (todo: OptimisticTodo) => {
@@ -912,6 +972,7 @@ export default function Home() {
           onResizeStop={handleDetailsResizeStop}
           createdLabel={detailCreatedLabel}
           updatedLabel={detailUpdatedLabel}
+          onUpdateDescription={handleUpdateDescription}
         />
       </div>
     </main>
