@@ -6,6 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
 
@@ -24,6 +25,7 @@ type TodoDetailsBlockProps = {
   createdLabel: string | null;
   updatedLabel: string | null;
   onUpdateDescription: (id: number, description: string) => Promise<boolean>;
+  onUpdateText: (id: number, text: string) => Promise<boolean>;
 };
 
 export function TodoDetailsBlock({
@@ -38,16 +40,25 @@ export function TodoDetailsBlock({
   createdLabel,
   updatedLabel,
   onUpdateDescription,
+  onUpdateText,
 }: TodoDetailsBlockProps) {
+  const [titleDraft, setTitleDraft] = useState("");
+  const [isTitleEditing, setIsTitleEditing] = useState(false);
+  const [isTitleSubmitting, setIsTitleSubmitting] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const lastTodoIdRef = useRef<number | null>(null);
   const selectedTodoId = selectedTodo?.id ?? null;
+  const selectedTodoText = selectedTodo?.text ?? "";
   const selectedTodoDescription = selectedTodo?.description ?? null;
 
   useEffect(() => {
     if (selectedTodoId === null) {
+      setTitleDraft("");
+      setIsTitleEditing(false);
+      setIsTitleSubmitting(false);
       setDescriptionDraft("");
       setIsDirty(false);
       setIsSubmitting(false);
@@ -55,30 +66,58 @@ export function TodoDetailsBlock({
       return;
     }
 
-    const nextValue = selectedTodoDescription ?? "";
+    const nextTitle = selectedTodoText;
+    const nextDescription = selectedTodoDescription ?? "";
     if (lastTodoIdRef.current !== selectedTodoId) {
       lastTodoIdRef.current = selectedTodoId;
-      setDescriptionDraft(nextValue);
+      setTitleDraft(nextTitle);
+      setIsTitleEditing(false);
+      setIsTitleSubmitting(false);
+      setDescriptionDraft(nextDescription);
       setIsDirty(false);
       setIsSubmitting(false);
       return;
     }
 
+    setTitleDraft((current) => {
+      if (isTitleEditing) {
+        return current;
+      }
+      if (current === nextTitle) {
+        return current;
+      }
+      return nextTitle;
+    });
+
     setDescriptionDraft((current) => {
       if (isDirty) {
         return current;
       }
-      if (current === nextValue) {
+      if (current === nextDescription) {
         return current;
       }
-      return nextValue;
+      return nextDescription;
     });
-  }, [selectedTodoId, selectedTodoDescription, isDirty]);
+  }, [
+    selectedTodoId,
+    selectedTodoDescription,
+    selectedTodoText,
+    isDirty,
+    isTitleEditing,
+  ]);
+
+  useEffect(() => {
+    if (isTitleEditing) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isTitleEditing]);
 
   if (!selectedTodo) {
     return null;
   }
 
+  const normalizedCurrentTitle = selectedTodoText.trim();
   const normalizedCurrentDescription = (selectedTodo.description ?? "").trim();
   const hasSavedDescription = normalizedCurrentDescription.length > 0;
   const helperText = isSubmitting
@@ -129,6 +168,68 @@ export function TodoDetailsBlock({
       setIsDirty(true);
     }
   };
+
+  const handleStartEditingTitle = () => {
+    setTitleDraft(selectedTodo.text);
+    setIsTitleEditing(true);
+    setIsTitleSubmitting(false);
+  };
+
+  const handleCancelTitleEdit = () => {
+    setTitleDraft(selectedTodo.text);
+    setIsTitleEditing(false);
+    setIsTitleSubmitting(false);
+  };
+
+  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setTitleDraft(event.target.value);
+  };
+
+  const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      handleCancelTitleEdit();
+    }
+  };
+
+  const handleTitleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextValue = titleDraft.trim();
+    const currentValue = normalizedCurrentTitle;
+
+    if (nextValue.length === 0) {
+      setTitleDraft(selectedTodo.text);
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+      return;
+    }
+
+    if (nextValue === currentValue) {
+      setTitleDraft(selectedTodo.text);
+      setIsTitleEditing(false);
+      return;
+    }
+
+    setTitleDraft(nextValue);
+    setIsTitleSubmitting(true);
+    let didSucceed = false;
+    try {
+      didSucceed = await onUpdateText(selectedTodo.id, nextValue);
+    } finally {
+      setIsTitleSubmitting(false);
+    }
+
+    if (didSucceed) {
+      setIsTitleEditing(false);
+    } else {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  };
+
+  const isTitleSaveDisabled =
+    isTitleSubmitting || titleDraft.trim().length === 0 ||
+    titleDraft.trim() === normalizedCurrentTitle;
 
   return (
     <Rnd
@@ -210,9 +311,59 @@ export function TodoDetailsBlock({
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-foreground-muted">
                 Todo Details
               </p>
-              <h2 className="text-2xl font-semibold leading-tight text-foreground">
-                {selectedTodo.text}
-              </h2>
+              {isTitleEditing ? (
+                <form onSubmit={handleTitleSubmit} className="space-y-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                    <input
+                      ref={titleInputRef}
+                      value={titleDraft}
+                      onChange={handleTitleChange}
+                      onKeyDown={handleTitleKeyDown}
+                      className="w-full rounded-2xl border border-border bg-surface/80 px-4 py-3 text-lg font-semibold leading-tight text-foreground shadow-[var(--shadow-soft)] transition focus:border-accent focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
+                      placeholder="Todo title"
+                      disabled={isTitleSubmitting}
+                      aria-label="Todo title"
+                    />
+                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={handleCancelTitleEdit}
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isTitleSubmitting}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isTitleSaveDisabled}
+                      >
+                        {isTitleSubmitting ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <h2
+                    className="text-2xl font-semibold leading-tight text-foreground"
+                    onDoubleClick={handleStartEditingTitle}
+                    title="Double-click to edit title"
+                  >
+                    {selectedTodo.text}
+                  </h2>
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={handleStartEditingTitle}
+                    className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground-muted transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    aria-label="Edit todo title"
+                    title="Edit todo title"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </header>
 
             <dl className="space-y-3 text-sm text-foreground-muted">
@@ -272,7 +423,7 @@ export function TodoDetailsBlock({
                       <button
                         type="button"
                         onClick={handleDescriptionReset}
-                        className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={isSubmitting}
                       >
                         Reset
@@ -280,7 +431,7 @@ export function TodoDetailsBlock({
                     )}
                     <button
                       type="submit"
-                      className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={!isDirty || isSubmitting}
                     >
                       {isSubmitting ? "Saving…" : "Save"}

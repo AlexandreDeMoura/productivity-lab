@@ -49,6 +49,16 @@ export const updateTodoDescriptionSchema = z.object({
     .nullable(),
 });
 
+// Schema specifically for updating the todo text/title
+export const updateTodoTextSchema = z.object({
+  id: z.number().int().positive("Invalid todo ID"),
+  text: z
+    .string()
+    .trim()
+    .min(1, "Todo text cannot be empty")
+    .max(500, "Todo text cannot exceed 500 characters"),
+});
+
 // Schema for toggling a todo's completion status
 export const toggleTodoSchema = z.object({
   id: z.number().int().positive("Invalid todo ID"),
@@ -70,6 +80,7 @@ export type UpdateTodoInput = z.infer<typeof updateTodoSchema>;
 export type UpdateTodoDescriptionInput = z.infer<
   typeof updateTodoDescriptionSchema
 >;
+export type UpdateTodoTextInput = z.infer<typeof updateTodoTextSchema>;
 export type ToggleTodoInput = z.infer<typeof toggleTodoSchema>;
 export type DeleteTodoInput = z.infer<typeof deleteTodoSchema>;
 export type GetTodosInput = z.infer<typeof getTodosSchema>;

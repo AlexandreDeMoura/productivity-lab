@@ -7,12 +7,14 @@ import {
   createTodoSchema,
   updateTodoSchema,
   updateTodoDescriptionSchema,
+  updateTodoTextSchema,
   toggleTodoSchema,
   deleteTodoSchema,
   getTodosSchema,
   type CreateTodoInput,
   type UpdateTodoInput,
   type UpdateTodoDescriptionInput,
+  type UpdateTodoTextInput,
   type ToggleTodoInput,
   type DeleteTodoInput,
   type GetTodosInput,
@@ -234,6 +236,47 @@ export async function updateTodoDescription(
       return { success: false, error: getZodErrorMessage(error) };
     }
     console.error("Unexpected error in updateTodoDescription:", error);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}
+
+export async function updateTodoText(
+  input: UpdateTodoTextInput
+): Promise<ActionResponse<Todo>> {
+  try {
+    const validatedInput = updateTodoTextSchema.parse(input);
+
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError || !user) {
+      return { success: false, error: authError };
+    }
+
+    const supabase = await createClient();
+
+    const { data, error } = await supabase
+      .from("todos")
+      .update({ text: validatedInput.text })
+      .eq("id", validatedInput.id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating todo text:", error);
+      return { success: false, error: "Failed to update todo" };
+    }
+
+    if (!data) {
+      return { success: false, error: "Todo not found or access denied" };
+    }
+
+    revalidatePath("/");
+    return { success: true, data: data as Todo };
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return { success: false, error: getZodErrorMessage(error) };
+    }
+    console.error("Unexpected error in updateTodoText:", error);
     return { success: false, error: "An unexpected error occurred" };
   }
 }
