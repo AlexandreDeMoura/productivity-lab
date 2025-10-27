@@ -20,8 +20,8 @@ import {
   toggleTodo,
   deleteTodo,
   clearCompletedTodos,
-  updateTodoDescription,
   updateTodoText,
+  updateTodoContent,
 } from "@/features/todos/actions/todoActions";
 import { signOut } from "@/features/auth/actions/authActions";
 import { TodosBlock } from "@/features/todos/components/TodosBlock";
@@ -33,13 +33,14 @@ import type {
   BlockLayouts,
   BlockRect,
 } from "@/features/todos/types/workspace";
+import type { PartialBlock } from "@blocknote/core";
 
 type OptimisticAction =
   | { type: "create"; todo: OptimisticTodo }
   | { type: "toggle"; id: number }
   | { type: "delete"; id: number }
   | { type: "clearCompleted" }
-  | { type: "updateDescription"; id: number; description: string | null }
+  | { type: "updateContent"; id: number; content: PartialBlock[] }
   | { type: "updateText"; id: number; text: string };
 
 const STORAGE_KEY = "workspace.layouts.v1";
@@ -305,12 +306,12 @@ export default function Home() {
         return currentTodos.filter((todo) => todo.id !== action.id);
       case "clearCompleted":
         return currentTodos.filter((todo) => !todo.done);
-      case "updateDescription":
+      case "updateContent":
         return currentTodos.map((todo) =>
           todo.id === action.id
             ? {
                 ...todo,
-                description: action.description,
+                content: action.content,
                 optimistic: true,
                 updated_at: new Date().toISOString(),
               }
@@ -674,6 +675,7 @@ export default function Home() {
       id: tempId,
       text: value,
       description: null,
+      content: [],
       done: false,
       user_id: "optimistic",
       created_at: now,
@@ -741,15 +743,14 @@ export default function Home() {
     });
   };
 
-  const handleUpdateDescription = useCallback(
-    (id: number, nextDescription: string): Promise<boolean> => {
+  const handleUpdateContent = useCallback(
+    (id: number, nextContent: PartialBlock[]): Promise<boolean> => {
       if (!isAuthenticated) {
-        setError("Please sign in to update description");
+        setError("Please sign in to update content");
         return Promise.resolve(false);
       }
 
-      const trimmed = nextDescription.trim();
-      const descriptionValue = trimmed.length === 0 ? null : trimmed;
+      const snapshot = JSON.parse(JSON.stringify(nextContent)) as PartialBlock[];
 
       setError(null);
       return new Promise<boolean>((resolve) => {
@@ -757,15 +758,12 @@ export default function Home() {
           let didSucceed = false;
           try {
             updateOptimisticTodos({
-              type: "updateDescription",
+              type: "updateContent",
               id,
-              description: descriptionValue,
+              content: snapshot,
             });
 
-            const result = await updateTodoDescription({
-              id,
-              description: descriptionValue,
-            });
+            const result = await updateTodoContent({ id, content: snapshot });
 
             if (result.success && result.data) {
               setTodos((previous) =>
@@ -773,10 +771,10 @@ export default function Home() {
               );
               didSucceed = true;
             } else {
-              setError(result.error || "Failed to update description");
+              setError(result.error || "Failed to update todo content");
             }
           } catch (error) {
-            console.error("Unexpected error updating description:", error);
+            console.error("Unexpected error updating content:", error);
             setError("An unexpected error occurred");
           } finally {
             resolve(didSucceed);
@@ -1033,7 +1031,7 @@ export default function Home() {
           onResizeStop={handleDetailsResizeStop}
           createdLabel={detailCreatedLabel}
           updatedLabel={detailUpdatedLabel}
-          onUpdateDescription={handleUpdateDescription}
+          onUpdateContent={handleUpdateContent}
           onUpdateText={handleUpdateText}
         />
       </div>
