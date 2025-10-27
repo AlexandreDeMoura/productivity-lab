@@ -388,9 +388,6 @@ export function TodoDetailsBlock({
         <section className="workspace-block__content glass-panel">
           <div className="space-y-6">
             <header className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-foreground-muted">
-                Todo Details
-              </p>
               {isTitleEditing ? (
                 <form onSubmit={handleTitleSubmit} className="space-y-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -473,37 +470,26 @@ export function TodoDetailsBlock({
                   <dd className="text-sm text-foreground">{updatedLabel}</dd>
                 </div>
               )}
-
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                  Owner
-                </dt>
-                <dd className="text-sm text-foreground">
-                  {selectedTodo.user_id || "Unknown"}
-                </dd>
-              </div>
             </dl>
 
-            <div className="todo-detail__summary space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted">
+            <div className="todo-detail__summary space-y-3 pt-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted pb-2 border-b border-border">
                 Notes
               </h3>
               <form onSubmit={handleContentSubmit} className="space-y-3">
-                <div className="rounded-2xl border border-border bg-surface/80 px-2 py-3 shadow-[var(--shadow-soft)]">
                   {editor ? (
                     <BlockNoteView
                       editor={editor}
                       onChange={handleEditorChange}
                       theme="light"
-                      className="bn-editor text-foreground"
+                      className="bn-editor text-foreground w-full"
                     />
                   ) : (
                     <p className="px-2 py-6 text-sm text-foreground-muted">
                       Initializing editor…
                     </p>
                   )}
-                </div>
-                <div className="flex flex-col gap-2 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2 border-t border-border pt-4 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
                   <p className="leading-5">{contentHelperText}</p>
                   <div className="flex items-center gap-2">
                     {isContentDirty && (

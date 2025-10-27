@@ -142,7 +142,7 @@
   border: 1px solid var(--glass-border);
   border-radius: 22px;
   box-shadow: var(--shadow-card);
-  padding: clamp(1.75rem, 2vw + 1.5rem, 3rem);
+  padding: 30px;
   backdrop-filter: blur(22px);
   transition: background 240ms var(--ease-smooth), border-color 240ms var(--ease-smooth),
     box-shadow 240ms var(--ease-smooth);
@@ -542,10 +542,7 @@
 }
 
 .todo-detail__summary {
-  padding: 1rem;
   border-radius: 24px;
-  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-  background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
 }
 
 .todo-text {
@@ -708,4 +705,8 @@
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+.bn-editor {
+  padding: 0 !important;
 }
