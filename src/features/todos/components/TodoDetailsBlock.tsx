@@ -1,17 +1,53 @@
 "use client";
 
+import "@blocknote/core/style.css";
+import "@blocknote/mantine/style.css";
+
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
+import { BlockNoteEditor, type PartialBlock } from "@blocknote/core";
+import { BlockNoteView } from "@blocknote/mantine";
 
 import type { BlockLayout } from "@/features/todos/types/workspace";
 import type { OptimisticTodo } from "@/features/todos/types/optimisticTodo";
+
+const EMPTY_CONTENT_JSON = "[]";
+
+const serializeContent = (content: PartialBlock[]): string =>
+  JSON.stringify(content);
+
+const deserializeContent = (json: string): PartialBlock[] => {
+  try {
+    return JSON.parse(json) as PartialBlock[];
+  } catch {
+    return [];
+  }
+};
+
+const createParagraphBlocksFromText = (text: string): PartialBlock[] => {
+  const lines = text.split(/\r?\n/);
+  return lines.map((line) =>
+    line.length > 0
+      ? {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: line,
+            },
+          ],
+        }
+      : { type: "paragraph" }
+  );
+};
 
 type TodoDetailsBlockProps = {
   layout: BlockLayout;
@@ -24,7 +60,7 @@ type TodoDetailsBlockProps = {
   onResizeStop: RndResizeCallback;
   createdLabel: string | null;
   updatedLabel: string | null;
-  onUpdateDescription: (id: number, description: string) => Promise<boolean>;
+  onUpdateContent: (id: number, content: PartialBlock[]) => Promise<boolean>;
   onUpdateText: (id: number, text: string) => Promise<boolean>;
 };
 
@@ -39,43 +75,37 @@ export function TodoDetailsBlock({
   onResizeStop,
   createdLabel,
   updatedLabel,
-  onUpdateDescription,
+  onUpdateContent,
   onUpdateText,
 }: TodoDetailsBlockProps) {
   const [titleDraft, setTitleDraft] = useState("");
   const [isTitleEditing, setIsTitleEditing] = useState(false);
   const [isTitleSubmitting, setIsTitleSubmitting] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [contentDraftJSON, setContentDraftJSON] = useState(EMPTY_CONTENT_JSON);
+  const [isContentDirty, setIsContentDirty] = useState(false);
+  const [isContentSubmitting, setIsContentSubmitting] = useState(false);
+  const [editor, setEditor] = useState<BlockNoteEditor | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const lastTodoIdRef = useRef<number | null>(null);
+  const lastSyncedContentRef = useRef<string>(EMPTY_CONTENT_JSON);
   const selectedTodoId = selectedTodo?.id ?? null;
   const selectedTodoText = selectedTodo?.text ?? "";
-  const selectedTodoDescription = selectedTodo?.description ?? null;
 
   useEffect(() => {
     if (selectedTodoId === null) {
       setTitleDraft("");
       setIsTitleEditing(false);
       setIsTitleSubmitting(false);
-      setDescriptionDraft("");
-      setIsDirty(false);
-      setIsSubmitting(false);
       lastTodoIdRef.current = null;
       return;
     }
 
     const nextTitle = selectedTodoText;
-    const nextDescription = selectedTodoDescription ?? "";
     if (lastTodoIdRef.current !== selectedTodoId) {
       lastTodoIdRef.current = selectedTodoId;
       setTitleDraft(nextTitle);
       setIsTitleEditing(false);
       setIsTitleSubmitting(false);
-      setDescriptionDraft(nextDescription);
-      setIsDirty(false);
-      setIsSubmitting(false);
       return;
     }
 
@@ -88,23 +118,72 @@ export function TodoDetailsBlock({
       }
       return nextTitle;
     });
+  }, [selectedTodoId, selectedTodoText, isTitleEditing]);
 
-    setDescriptionDraft((current) => {
-      if (isDirty) {
-        return current;
-      }
-      if (current === nextDescription) {
-        return current;
-      }
-      return nextDescription;
-    });
-  }, [
-    selectedTodoId,
-    selectedTodoDescription,
-    selectedTodoText,
-    isDirty,
-    isTitleEditing,
-  ]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const newEditor = BlockNoteEditor.create();
+    setEditor(newEditor);
+
+    return () => {
+      newEditor.destroy();
+      setEditor(null);
+    };
+  }, []);
+
+  const normalizedContentJSON = useMemo(() => {
+    if (!selectedTodo) {
+      return EMPTY_CONTENT_JSON;
+    }
+
+    if (Array.isArray(selectedTodo.content) && selectedTodo.content.length > 0) {
+      return serializeContent(selectedTodo.content);
+    }
+
+    const fallback =
+      (selectedTodo.description ?? "").trim() || selectedTodo.text.trim();
+
+    if (fallback.length === 0) {
+      return EMPTY_CONTENT_JSON;
+    }
+
+    return serializeContent(createParagraphBlocksFromText(fallback));
+  }, [selectedTodo]);
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    if (selectedTodoId === null) {
+      setContentDraftJSON(EMPTY_CONTENT_JSON);
+      setIsContentDirty(false);
+      setIsContentSubmitting(false);
+      lastSyncedContentRef.current = EMPTY_CONTENT_JSON;
+      return;
+    }
+
+    const baselineJSON = normalizedContentJSON;
+    let nextSyncedJSON = baselineJSON;
+
+    const currentJSON = JSON.stringify(editor.document);
+    if (currentJSON !== baselineJSON) {
+      const baselineContent = deserializeContent(baselineJSON);
+      const replacement = baselineContent.length > 0 ? baselineContent : [];
+      editor.replaceBlocks(editor.document, replacement);
+      nextSyncedJSON = JSON.stringify(editor.document);
+    } else {
+      nextSyncedJSON = currentJSON;
+    }
+
+    lastSyncedContentRef.current = nextSyncedJSON;
+    setContentDraftJSON(nextSyncedJSON);
+    setIsContentDirty(false);
+    setIsContentSubmitting(false);
+  }, [selectedTodoId, normalizedContentJSON, editor]);
 
   useEffect(() => {
     if (isTitleEditing) {
@@ -113,59 +192,60 @@ export function TodoDetailsBlock({
     }
   }, [isTitleEditing]);
 
+  const contentHelperText = !editor
+    ? "Loading editor…"
+    : isContentSubmitting
+      ? "Saving content…"
+      : isContentDirty
+        ? "You have unsaved changes."
+        : "All changes saved.";
+
+  const handleEditorChange = useCallback(
+    (editorInstance: BlockNoteEditor) => {
+      const json = JSON.stringify(editorInstance.document);
+      setContentDraftJSON(json);
+      setIsContentDirty(json !== lastSyncedContentRef.current);
+    },
+    []
+  );
+
+  const handleContentReset = useCallback(() => {
+    if (!editor) {
+      return;
+    }
+
+    const baselineContent = deserializeContent(lastSyncedContentRef.current);
+    const replacement = baselineContent.length > 0 ? baselineContent : [];
+    editor.replaceBlocks(editor.document, replacement);
+    const nextJSON = JSON.stringify(editor.document);
+    setContentDraftJSON(nextJSON);
+    setIsContentDirty(false);
+  }, [editor]);
+
   if (!selectedTodo) {
     return null;
   }
 
   const normalizedCurrentTitle = selectedTodoText.trim();
-  const normalizedCurrentDescription = (selectedTodo.description ?? "").trim();
-  const hasSavedDescription = normalizedCurrentDescription.length > 0;
-  const helperText = isSubmitting
-    ? "Saving description…"
-    : isDirty
-      ? "You have unsaved changes."
-      : hasSavedDescription
-        ? "Description saved."
-        : "No description yet. Add more context above.";
 
-  const handleDescriptionChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    const nextValue = event.target.value;
-    setDescriptionDraft(nextValue);
-
-    const nextNormalized = nextValue.trim();
-    setIsDirty(nextNormalized !== normalizedCurrentDescription);
-  };
-
-  const handleDescriptionReset = () => {
-    setDescriptionDraft(selectedTodo.description ?? "");
-    setIsDirty(false);
-  };
-
-  const handleDescriptionSubmit = async (
-    event: FormEvent<HTMLFormElement>
-  ) => {
+  const handleContentSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const draftBeforeSubmit = descriptionDraft;
-    const nextNormalized = draftBeforeSubmit.trim();
-
-    if (nextNormalized === normalizedCurrentDescription) {
-      setDescriptionDraft(selectedTodo.description ?? "");
-      setIsDirty(false);
+    if (!selectedTodo || !editor || !isContentDirty || isContentSubmitting) {
       return;
     }
 
-    setDescriptionDraft(nextNormalized);
-    setIsSubmitting(true);
-    const didSucceed = await onUpdateDescription(
-      selectedTodo.id,
-      draftBeforeSubmit
-    );
-    setIsSubmitting(false);
+    const contentToSave = deserializeContent(contentDraftJSON);
+    setIsContentSubmitting(true);
+    const didSucceed = await onUpdateContent(selectedTodo.id, contentToSave);
+    setIsContentSubmitting(false);
 
     if (didSucceed) {
-      setIsDirty(false);
+      const serialized = serializeContent(contentToSave);
+      lastSyncedContentRef.current = serialized;
+      setContentDraftJSON(serialized);
+      setIsContentDirty(false);
     } else {
-      setIsDirty(true);
+      setIsContentDirty(true);
     }
   };
 
@@ -181,7 +261,7 @@ export function TodoDetailsBlock({
     setIsTitleSubmitting(false);
   };
 
-  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setTitleDraft(event.target.value);
   };
 
@@ -308,9 +388,6 @@ export function TodoDetailsBlock({
         <section className="workspace-block__content glass-panel">
           <div className="space-y-6">
             <header className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-foreground-muted">
-                Todo Details
-              </p>
               {isTitleEditing ? (
                 <form onSubmit={handleTitleSubmit} className="space-y-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -393,38 +470,34 @@ export function TodoDetailsBlock({
                   <dd className="text-sm text-foreground">{updatedLabel}</dd>
                 </div>
               )}
-
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-subtle">
-                  Owner
-                </dt>
-                <dd className="text-sm text-foreground">
-                  {selectedTodo.user_id || "Unknown"}
-                </dd>
-              </div>
             </dl>
 
-            <div className="todo-detail__summary space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted">
-                Description
+            <div className="todo-detail__summary space-y-3 pt-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-foreground-muted pb-2 border-b border-border">
+                Notes
               </h3>
-              <form onSubmit={handleDescriptionSubmit} className="space-y-3">
-                <textarea
-                  value={descriptionDraft}
-                  onChange={handleDescriptionChange}
-                  placeholder="Add more context or next steps…"
-                  className="w-full min-h-[140px] resize-none rounded-2xl border border-border bg-surface/80 px-4 py-3 text-sm leading-relaxed text-foreground shadow-[var(--shadow-soft)] transition focus:border-accent focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                />
-                <div className="flex flex-col gap-2 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
-                  <p className="leading-5">{helperText}</p>
+              <form onSubmit={handleContentSubmit} className="space-y-3">
+                  {editor ? (
+                    <BlockNoteView
+                      editor={editor}
+                      onChange={handleEditorChange}
+                      theme="light"
+                      className="bn-editor text-foreground w-full"
+                    />
+                  ) : (
+                    <p className="px-2 py-6 text-sm text-foreground-muted">
+                      Initializing editor…
+                    </p>
+                  )}
+                <div className="flex flex-col gap-2 border-t border-border pt-4 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
+                  <p className="leading-5">{contentHelperText}</p>
                   <div className="flex items-center gap-2">
-                    {isDirty && (
+                    {isContentDirty && (
                       <button
                         type="button"
-                        onClick={handleDescriptionReset}
+                        onClick={handleContentReset}
                         className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={isSubmitting}
+                        disabled={isContentSubmitting || !editor}
                       >
                         Reset
                       </button>
@@ -432,9 +505,9 @@ export function TodoDetailsBlock({
                     <button
                       type="submit"
                       className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={!isDirty || isSubmitting}
+                      disabled={!editor || !isContentDirty || isContentSubmitting}
                     >
-                      {isSubmitting ? "Saving…" : "Save"}
+                      {isContentSubmitting ? "Saving…" : "Save"}
                     </button>
                   </div>
                 </div>

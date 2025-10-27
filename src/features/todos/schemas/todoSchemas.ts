@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const blockNoteContentSchema = z.array(z.unknown()).default([]);
+
 // Schema for creating a todo
 export const createTodoSchema = z.object({
   text: z
@@ -13,6 +15,7 @@ export const createTodoSchema = z.object({
     .max(2000, "Description cannot exceed 2000 characters")
     .optional()
     .nullable(),
+  content: blockNoteContentSchema.optional(),
 });
 
 // Schema for updating a todo
@@ -31,12 +34,17 @@ export const updateTodoSchema = z.object({
     .max(2000, "Description cannot exceed 2000 characters")
     .optional()
     .nullable(),
+  content: blockNoteContentSchema.optional(),
 }).refine(
   (data) =>
     data.text !== undefined ||
     data.done !== undefined ||
-    data.description !== undefined,
-  { message: "At least one field (text, done, or description) must be provided" }
+    data.description !== undefined ||
+    data.content !== undefined,
+  {
+    message:
+      "At least one field (text, done, description, or content) must be provided",
+  }
 );
 
 // Schema specifically for updating the description
@@ -57,6 +65,11 @@ export const updateTodoTextSchema = z.object({
     .trim()
     .min(1, "Todo text cannot be empty")
     .max(500, "Todo text cannot exceed 500 characters"),
+});
+
+export const updateTodoContentSchema = z.object({
+  id: z.number().int().positive("Invalid todo ID"),
+  content: blockNoteContentSchema,
 });
 
 // Schema for toggling a todo's completion status
@@ -81,6 +94,7 @@ export type UpdateTodoDescriptionInput = z.infer<
   typeof updateTodoDescriptionSchema
 >;
 export type UpdateTodoTextInput = z.infer<typeof updateTodoTextSchema>;
+export type UpdateTodoContentInput = z.infer<typeof updateTodoContentSchema>;
 export type ToggleTodoInput = z.infer<typeof toggleTodoSchema>;
 export type DeleteTodoInput = z.infer<typeof deleteTodoSchema>;
 export type GetTodosInput = z.infer<typeof getTodosSchema>;

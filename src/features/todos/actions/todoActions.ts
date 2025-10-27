@@ -8,6 +8,7 @@ import {
   updateTodoSchema,
   updateTodoDescriptionSchema,
   updateTodoTextSchema,
+  updateTodoContentSchema,
   toggleTodoSchema,
   deleteTodoSchema,
   getTodosSchema,
@@ -15,6 +16,7 @@ import {
   type UpdateTodoInput,
   type UpdateTodoDescriptionInput,
   type UpdateTodoTextInput,
+  type UpdateTodoContentInput,
   type ToggleTodoInput,
   type DeleteTodoInput,
   type GetTodosInput,
@@ -32,6 +34,42 @@ function normalizeDescription(description?: string | null) {
 
   const value = description.trim();
   return value.length === 0 ? null : value;
+}
+
+function normalizeContent(content: unknown): Todo["content"] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(content)) as Todo["content"];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeTodoRecord(record: Record<string, unknown>): Todo {
+  const row = record as {
+    id: number;
+    text: string;
+    description?: string | null;
+    content?: unknown;
+    done: boolean;
+    user_id: string;
+    created_at: string;
+    updated_at: string;
+  };
+
+  return {
+    id: row.id,
+    text: row.text,
+    description: row.description ?? null,
+    content: normalizeContent(row.content),
+    done: row.done,
+    user_id: row.user_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 // Helper function to get authenticated user
@@ -86,7 +124,8 @@ export async function getTodos(
       return { success: false, error: "Failed to fetch todos" };
     }
 
-    return { success: true, data: data as Todo[] };
+    const todos = (data ?? []).map((record) => normalizeTodoRecord(record));
+    return { success: true, data: todos };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
@@ -112,6 +151,9 @@ export async function createTodo(
 
     const supabase = await createClient();
     const description = normalizeDescription(validatedInput.description);
+    const content = Array.isArray(validatedInput.content)
+      ? (validatedInput.content as Todo["content"])
+      : [];
 
     // Insert todo
     const { data, error } = await supabase
@@ -119,6 +161,7 @@ export async function createTodo(
       .insert({
         text: validatedInput.text,
         description,
+        content,
         user_id: user.id,
         done: false,
       })
@@ -130,8 +173,12 @@ export async function createTodo(
       return { success: false, error: "Failed to create todo" };
     }
 
+    if (!data) {
+      return { success: false, error: "Failed to create todo" };
+    }
+
     revalidatePath("/");
-    return { success: true, data: data as Todo };
+    return { success: true, data: normalizeTodoRecord(data) };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
@@ -158,7 +205,12 @@ export async function updateTodo(
     const supabase = await createClient();
 
     // Build update object
-    const updates: { text?: string; done?: boolean; description?: string | null } = {};
+    const updates: {
+      text?: string;
+      done?: boolean;
+      description?: string | null;
+      content?: Todo["content"];
+    } = {};
     if (validatedInput.text !== undefined) {
       updates.text = validatedInput.text;
     }
@@ -167,6 +219,11 @@ export async function updateTodo(
     }
     if (validatedInput.description !== undefined) {
       updates.description = normalizeDescription(validatedInput.description);
+    }
+    if (validatedInput.content !== undefined) {
+      updates.content = Array.isArray(validatedInput.content)
+        ? (validatedInput.content as Todo["content"])
+        : [];
     }
 
     // Update todo (RLS ensures user can only update their own todos)
@@ -188,7 +245,7 @@ export async function updateTodo(
     }
 
     revalidatePath("/");
-    return { success: true, data: data as Todo };
+    return { success: true, data: normalizeTodoRecord(data) };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
@@ -230,7 +287,7 @@ export async function updateTodoDescription(
     }
 
     revalidatePath("/");
-    return { success: true, data: data as Todo };
+    return { success: true, data: normalizeTodoRecord(data) };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
@@ -271,12 +328,56 @@ export async function updateTodoText(
     }
 
     revalidatePath("/");
-    return { success: true, data: data as Todo };
+    return { success: true, data: normalizeTodoRecord(data) };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
     }
     console.error("Unexpected error in updateTodoText:", error);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}
+
+export async function updateTodoContent(
+  input: UpdateTodoContentInput
+): Promise<ActionResponse<Todo>> {
+  try {
+    const validatedInput = updateTodoContentSchema.parse(input);
+
+    const { user, error: authError } = await getAuthenticatedUser();
+    if (authError || !user) {
+      return { success: false, error: authError };
+    }
+
+    const supabase = await createClient();
+    const content = Array.isArray(validatedInput.content)
+      ? (validatedInput.content as Todo["content"])
+      : [];
+
+    const { data, error } = await supabase
+      .from("todos")
+      .update({ content })
+      .eq("id", validatedInput.id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating todo content:", error);
+      return { success: false, error: "Failed to update todo content" };
+    }
+
+    if (!data) {
+      return { success: false, error: "Todo not found or access denied" };
+    }
+
+    revalidatePath("/");
+    return { success: true, data: normalizeTodoRecord(data) };
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return { success: false, error: getZodErrorMessage(error) };
+    }
+    console.error("Unexpected error in updateTodoContent:", error);
     return { success: false, error: "An unexpected error occurred" };
   }
 }
@@ -324,7 +425,7 @@ export async function toggleTodo(
     }
 
     revalidatePath("/");
-    return { success: true, data: data as Todo };
+    return { success: true, data: normalizeTodoRecord(data) };
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };

@@ -7,7 +7,7 @@
  * Project: Pandora Box (Next.js 15.5.5 + Supabase)
  * Database: PostgreSQL (Supabase)
  * Authentication: Supabase Auth
- * Last Updated: 2025-10-21
+ * Last Updated: 2025-10-24
  */
 
 -- ==================================================================
@@ -96,6 +96,9 @@ create table public.todos (
   -- Completion status
   done boolean not null default false,
   
+  -- Structured block content (rich editor data)
+  content jsonb not null default '[]'::jsonb,
+  
   -- User ownership (foreign key to auth.users)
   user_id uuid not null references auth.users (id) on delete cascade,
   
@@ -110,6 +113,7 @@ comment on column public.todos.id is 'Unique identifier for the todo item';
 comment on column public.todos.text is 'The todo item description or task name';
 comment on column public.todos.description is 'Extended description for the todo item';
 comment on column public.todos.done is 'Whether the todo item has been completed';
+comment on column public.todos.content is 'Structured block content for the todo item stored as JSON.';
 comment on column public.todos.user_id is 'Reference to the user who owns this todo';
 comment on column public.todos.created_at is 'Timestamp when the todo was created';
 comment on column public.todos.updated_at is 'Timestamp when the todo was last updated';
@@ -321,6 +325,7 @@ export type Todo = {
   text: string;
   description: string | null;
   done: boolean;
+  content: unknown; // Block-based rich content stored as JSON array
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -329,14 +334,16 @@ export type Todo = {
 export type TodoInsert = {
   text: string;
   description?: string | null;
-  user_id: string;
   done?: boolean;
+  content?: unknown; // Defaults to []
+  user_id: string;
 };
 
 export type TodoUpdate = {
   text?: string;
   description?: string | null;
   done?: boolean;
+  content?: unknown;
 };
 
 // Supabase auto-generated types (use `supabase gen types typescript` for full types)
