@@ -261,7 +261,7 @@ export function TodoDetailsBlock({
     setIsTitleSubmitting(false);
   };
 
-  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setTitleDraft(event.target.value);
   };
 
