@@ -9,14 +9,12 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import { Rnd, type RndDragCallback, type RndResizeCallback } from "react-rnd";
-import type { BlockNoteEditor, PartialBlock } from "@blocknote/core";
+import { BlockNoteEditor, type PartialBlock } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/mantine";
-import { useCreateBlockNote } from "@blocknote/react";
 
 import type { BlockLayout } from "@/features/todos/types/workspace";
 import type { OptimisticTodo } from "@/features/todos/types/optimisticTodo";
@@ -86,6 +84,7 @@ export function TodoDetailsBlock({
   const [contentDraftJSON, setContentDraftJSON] = useState(EMPTY_CONTENT_JSON);
   const [isContentDirty, setIsContentDirty] = useState(false);
   const [isContentSubmitting, setIsContentSubmitting] = useState(false);
+  const [editor, setEditor] = useState<BlockNoteEditor | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const lastTodoIdRef = useRef<number | null>(null);
   const lastSyncedContentRef = useRef<string>(EMPTY_CONTENT_JSON);
@@ -121,6 +120,20 @@ export function TodoDetailsBlock({
     });
   }, [selectedTodoId, selectedTodoText, isTitleEditing]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const newEditor = BlockNoteEditor.create();
+    setEditor(newEditor);
+
+    return () => {
+      newEditor.destroy();
+      setEditor(null);
+    };
+  }, []);
+
   const normalizedContentJSON = useMemo(() => {
     if (!selectedTodo) {
       return EMPTY_CONTENT_JSON;
@@ -140,19 +153,11 @@ export function TodoDetailsBlock({
     return serializeContent(createParagraphBlocksFromText(fallback));
   }, [selectedTodo]);
 
-  const initialEditorContent = useMemo(() => {
-    const parsed = deserializeContent(normalizedContentJSON);
-    return parsed.length > 0 ? parsed : undefined;
-  }, [normalizedContentJSON]);
-
-  const editor = useCreateBlockNote(
-    {
-      initialContent: initialEditorContent,
-    },
-    [selectedTodoId]
-  );
-
   useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
     if (selectedTodoId === null) {
       setContentDraftJSON(EMPTY_CONTENT_JSON);
       setIsContentDirty(false);
@@ -164,17 +169,14 @@ export function TodoDetailsBlock({
     const baselineJSON = normalizedContentJSON;
     let nextSyncedJSON = baselineJSON;
 
-    if (editor) {
-      const currentJSON = JSON.stringify(editor.document);
-      if (currentJSON !== baselineJSON) {
-        const baselineContent = deserializeContent(baselineJSON);
-        const replacement =
-          baselineContent.length > 0 ? baselineContent : [];
-        editor.replaceBlocks(editor.document, replacement);
-        nextSyncedJSON = JSON.stringify(editor.document);
-      } else {
-        nextSyncedJSON = currentJSON;
-      }
+    const currentJSON = JSON.stringify(editor.document);
+    if (currentJSON !== baselineJSON) {
+      const baselineContent = deserializeContent(baselineJSON);
+      const replacement = baselineContent.length > 0 ? baselineContent : [];
+      editor.replaceBlocks(editor.document, replacement);
+      nextSyncedJSON = JSON.stringify(editor.document);
+    } else {
+      nextSyncedJSON = currentJSON;
     }
 
     lastSyncedContentRef.current = nextSyncedJSON;
@@ -190,11 +192,13 @@ export function TodoDetailsBlock({
     }
   }, [isTitleEditing]);
 
-  const contentHelperText = isContentSubmitting
-    ? "Saving content…"
-    : isContentDirty
-      ? "You have unsaved changes."
-      : "All changes saved.";
+  const contentHelperText = !editor
+    ? "Loading editor…"
+    : isContentSubmitting
+      ? "Saving content…"
+      : isContentDirty
+        ? "You have unsaved changes."
+        : "All changes saved.";
 
   const handleEditorChange = useCallback(
     (editorInstance: BlockNoteEditor) => {
@@ -226,7 +230,7 @@ export function TodoDetailsBlock({
 
   const handleContentSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedTodo || !isContentDirty || isContentSubmitting) {
+    if (!selectedTodo || !editor || !isContentDirty || isContentSubmitting) {
       return;
     }
 
@@ -486,12 +490,18 @@ export function TodoDetailsBlock({
               </h3>
               <form onSubmit={handleContentSubmit} className="space-y-3">
                 <div className="rounded-2xl border border-border bg-surface/80 px-2 py-3 shadow-[var(--shadow-soft)]">
-                  <BlockNoteView
-                    editor={editor}
-                    onChange={handleEditorChange}
-                    theme="light"
-                    className="bn-editor text-foreground"
-                  />
+                  {editor ? (
+                    <BlockNoteView
+                      editor={editor}
+                      onChange={handleEditorChange}
+                      theme="light"
+                      className="bn-editor text-foreground"
+                    />
+                  ) : (
+                    <p className="px-2 py-6 text-sm text-foreground-muted">
+                      Initializing editor…
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-2 text-xs text-foreground-subtle sm:flex-row sm:items-center sm:justify-between">
                   <p className="leading-5">{contentHelperText}</p>
@@ -501,7 +511,7 @@ export function TodoDetailsBlock({
                         type="button"
                         onClick={handleContentReset}
                         className="inline-flex h-8 items-center justify-center rounded-full border border-border px-3 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground-muted transition hover:border-foreground-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={isContentSubmitting}
+                        disabled={isContentSubmitting || !editor}
                       >
                         Reset
                       </button>
@@ -509,7 +519,7 @@ export function TodoDetailsBlock({
                     <button
                       type="submit"
                       className="inline-flex h-8 items-center justify-center rounded-full border border-border px-4 text-[0.7rem] font-semibold uppercase cursor-pointer tracking-[0.18em] text-foreground transition hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={!isContentDirty || isContentSubmitting}
+                      disabled={!editor || !isContentDirty || isContentSubmitting}
                     >
                       {isContentSubmitting ? "Saving…" : "Save"}
                     </button>

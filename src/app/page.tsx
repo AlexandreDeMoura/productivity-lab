@@ -750,7 +750,12 @@ export default function Home() {
         return Promise.resolve(false);
       }
 
-      const snapshot = JSON.parse(JSON.stringify(nextContent)) as PartialBlock[];
+      const snapshot =
+        typeof structuredClone === "function"
+          ? structuredClone(nextContent ?? [])
+          : (JSON.parse(
+              JSON.stringify(nextContent ?? [])
+            ) as PartialBlock[]);
 
       setError(null);
       return new Promise<boolean>((resolve) => {

@@ -1,18 +1,6 @@
 import { z } from "zod";
 
-const blockNoteContentSchema = z
-  .array(
-    z
-      .object({
-        id: z.string().optional(),
-        type: z.string().optional(),
-        props: z.record(z.unknown()).optional(),
-        content: z.unknown().optional(),
-        children: z.unknown().optional(),
-      })
-      .passthrough()
-  )
-  .default([]);
+const blockNoteContentSchema = z.array(z.unknown()).default([]);
 
 // Schema for creating a todo
 export const createTodoSchema = z.object({
