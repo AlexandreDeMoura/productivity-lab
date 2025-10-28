@@ -16,6 +16,7 @@ export const createTodoSchema = z.object({
     .optional()
     .nullable(),
   content: blockNoteContentSchema.optional(),
+  project_id: z.number().int().positive("Invalid project ID"),
 });
 
 // Schema for updating a todo
@@ -35,6 +36,7 @@ export const updateTodoSchema = z.object({
     .optional()
     .nullable(),
   content: blockNoteContentSchema.optional(),
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 }).refine(
   (data) =>
     data.text !== undefined ||
@@ -55,6 +57,7 @@ export const updateTodoDescriptionSchema = z.object({
     .trim()
     .max(2000, "Description cannot exceed 2000 characters")
     .nullable(),
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 });
 
 // Schema specifically for updating the todo text/title
@@ -65,25 +68,30 @@ export const updateTodoTextSchema = z.object({
     .trim()
     .min(1, "Todo text cannot be empty")
     .max(500, "Todo text cannot exceed 500 characters"),
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 });
 
 export const updateTodoContentSchema = z.object({
   id: z.number().int().positive("Invalid todo ID"),
   content: blockNoteContentSchema,
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 });
 
 // Schema for toggling a todo's completion status
 export const toggleTodoSchema = z.object({
   id: z.number().int().positive("Invalid todo ID"),
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 });
 
 // Schema for deleting a todo
 export const deleteTodoSchema = z.object({
   id: z.number().int().positive("Invalid todo ID"),
+  project_id: z.number().int().positive("Invalid project ID").optional(),
 });
 
 // Schema for filtering todos
 export const getTodosSchema = z.object({
+  project_id: z.number().int().positive("Invalid project ID"),
   filter: z.enum(["all", "active", "completed"]).optional().default("all"),
 });
 

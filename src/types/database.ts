@@ -8,6 +8,7 @@ export type Todo = {
   content: PartialBlock[];
   done: boolean;
   user_id: string;
+  project_id: number;
   created_at: string;
   updated_at: string;
 };
@@ -17,6 +18,7 @@ export type TodoInsert = {
   description?: string | null;
   content?: PartialBlock[];
   user_id: string;
+  project_id: number;
   done?: boolean;
 };
 
@@ -25,6 +27,30 @@ export type TodoUpdate = {
   description?: string | null;
   content?: PartialBlock[];
   done?: boolean;
+  project_id?: number;
+};
+
+export type Project = {
+  id: number;
+  name: string;
+  description: string | null;
+  owner_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectInsert = {
+  name: string;
+  description?: string | null;
+  owner_id: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProjectUpdate = {
+  id: number;
+  name?: string;
+  description?: string | null;
 };
 
 // Server action response type

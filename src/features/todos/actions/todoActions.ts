@@ -23,6 +23,27 @@ import {
 } from "../schemas/todoSchemas";
 import { ZodError } from "zod";
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+class ProjectResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectResolutionError";
+  }
+}
+
+type CreateTodoActionInput = Omit<CreateTodoInput, "project_id"> & {
+  project_id?: number;
+};
+
+type GetTodosActionInput = Partial<GetTodosInput> & {
+  project_id?: number;
+};
+
+type ClearCompletedTodosInput = {
+  project_id?: number;
+};
+
 function getZodErrorMessage(error: ZodError<unknown>) {
   return error.issues[0]?.message ?? "Validation failed";
 }
@@ -56,6 +77,7 @@ function normalizeTodoRecord(record: Record<string, unknown>): Todo {
     content?: unknown;
     done: boolean;
     user_id: string;
+    project_id: number;
     created_at: string;
     updated_at: string;
   };
@@ -67,9 +89,88 @@ function normalizeTodoRecord(record: Record<string, unknown>): Todo {
     content: normalizeContent(row.content),
     done: row.done,
     user_id: row.user_id,
+    project_id: row.project_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+async function resolveProjectId(
+  supabase: SupabaseServerClient,
+  userId: string,
+  providedProjectId?: number
+): Promise<number> {
+  if (typeof providedProjectId === "number" && Number.isFinite(providedProjectId)) {
+    return providedProjectId;
+  }
+
+  const {
+    data: todoProjects,
+    error: todoProjectError,
+  } = await supabase
+    .from("todos")
+    .select("project_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (todoProjectError) {
+    console.error("Error resolving project from todos:", todoProjectError);
+    throw new ProjectResolutionError("Failed to resolve default project");
+  }
+
+  const todoProjectId = todoProjects?.[0]?.project_id;
+  if (typeof todoProjectId === "number" && Number.isFinite(todoProjectId)) {
+    return todoProjectId;
+  }
+
+  const {
+    data: ownedProjects,
+    error: ownedError,
+  } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("owner_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (ownedError) {
+    if (ownedError.code !== "42P17") {
+      console.error("Error resolving owned project:", ownedError);
+      throw new ProjectResolutionError("Failed to resolve default project");
+    }
+  } else {
+    const ownedProjectId = ownedProjects?.[0]?.id;
+    if (typeof ownedProjectId === "number" && Number.isFinite(ownedProjectId)) {
+      return ownedProjectId;
+    }
+  }
+
+  const { data: memberProjects, error: memberError } = await supabase
+    .from("project_members")
+    .select("project_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (memberError) {
+    if (memberError.code !== "42P17") {
+      console.error("Error resolving member project:", memberError);
+      throw new ProjectResolutionError("Failed to resolve default project");
+    }
+  } else {
+    const memberProjectId = memberProjects?.[0]?.project_id;
+    if (
+      typeof memberProjectId === "number" &&
+      Number.isFinite(memberProjectId)
+    ) {
+      return memberProjectId;
+    }
+  }
+
+  throw new ProjectResolutionError(
+    "No accessible project found. Create or join a project to continue."
+  );
 }
 
 // Helper function to get authenticated user
@@ -89,12 +190,9 @@ async function getAuthenticatedUser() {
 
 // Get all todos for the current user
 export async function getTodos(
-  input?: GetTodosInput
+  input?: GetTodosActionInput
 ): Promise<ActionResponse<Todo[]>> {
   try {
-    // Validate input
-    const validatedInput = getTodosSchema.parse(input || {});
-
     // Get authenticated user
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError || !user) {
@@ -103,11 +201,24 @@ export async function getTodos(
 
     const supabase = await createClient();
 
+    const projectId = await resolveProjectId(
+      supabase,
+      user.id,
+      input?.project_id
+    );
+
+    // Validate input
+    const validatedInput = getTodosSchema.parse({
+      ...input,
+      project_id: projectId,
+    } satisfies GetTodosInput);
+
     // Build query
     let query = supabase
       .from("todos")
       .select("*")
       .eq("user_id", user.id)
+      .eq("project_id", validatedInput.project_id)
       .order("created_at", { ascending: false });
 
     // Apply filter
@@ -130,6 +241,9 @@ export async function getTodos(
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
     }
+    if (error instanceof ProjectResolutionError) {
+      return { success: false, error: error.message };
+    }
     console.error("Unexpected error in getTodos:", error);
     return { success: false, error: "An unexpected error occurred" };
   }
@@ -137,12 +251,9 @@ export async function getTodos(
 
 // Create a new todo
 export async function createTodo(
-  input: CreateTodoInput
+  input: CreateTodoActionInput
 ): Promise<ActionResponse<Todo>> {
   try {
-    // Validate input
-    const validatedInput = createTodoSchema.parse(input);
-
     // Get authenticated user
     const { user, error: authError } = await getAuthenticatedUser();
     if (authError || !user) {
@@ -150,6 +261,17 @@ export async function createTodo(
     }
 
     const supabase = await createClient();
+    const projectId = await resolveProjectId(
+      supabase,
+      user.id,
+      input.project_id
+    );
+
+    // Validate input
+    const validatedInput = createTodoSchema.parse({
+      ...input,
+      project_id: projectId,
+    } satisfies CreateTodoInput);
     const description = normalizeDescription(validatedInput.description);
     const content = Array.isArray(validatedInput.content)
       ? (validatedInput.content as Todo["content"])
@@ -163,6 +285,7 @@ export async function createTodo(
         description,
         content,
         user_id: user.id,
+        project_id: validatedInput.project_id,
         done: false,
       })
       .select()
@@ -182,6 +305,9 @@ export async function createTodo(
   } catch (error) {
     if (error instanceof ZodError) {
       return { success: false, error: getZodErrorMessage(error) };
+    }
+    if (error instanceof ProjectResolutionError) {
+      return { success: false, error: error.message };
     }
     console.error("Unexpected error in createTodo:", error);
     return { success: false, error: "An unexpected error occurred" };
@@ -227,13 +353,17 @@ export async function updateTodo(
     }
 
     // Update todo (RLS ensures user can only update their own todos)
-    const { data, error } = await supabase
+    let query = supabase
       .from("todos")
       .update(updates)
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      query = query.eq("project_id", validatedInput.project_id);
+    }
+
+    const { data, error } = await query.select().single();
 
     if (error) {
       console.error("Error updating todo:", error);
@@ -269,13 +399,17 @@ export async function updateTodoDescription(
     const supabase = await createClient();
     const description = normalizeDescription(validatedInput.description);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("todos")
       .update({ description })
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      query = query.eq("project_id", validatedInput.project_id);
+    }
+
+    const { data, error } = await query.select().single();
 
     if (error) {
       console.error("Error updating todo description:", error);
@@ -310,13 +444,17 @@ export async function updateTodoText(
 
     const supabase = await createClient();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("todos")
       .update({ text: validatedInput.text })
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      query = query.eq("project_id", validatedInput.project_id);
+    }
+
+    const { data, error } = await query.select().single();
 
     if (error) {
       console.error("Error updating todo text:", error);
@@ -354,13 +492,17 @@ export async function updateTodoContent(
       ? (validatedInput.content as Todo["content"])
       : [];
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("todos")
       .update({ content })
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      query = query.eq("project_id", validatedInput.project_id);
+    }
+
+    const { data, error } = await query.select().single();
 
     if (error) {
       console.error("Error updating todo content:", error);
@@ -399,25 +541,37 @@ export async function toggleTodo(
     const supabase = await createClient();
 
     // First, get the current todo to know its current state
-    const { data: currentTodo, error: fetchError } = await supabase
+    let currentQuery = supabase
       .from("todos")
       .select("done")
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      currentQuery = currentQuery.eq(
+        "project_id",
+        validatedInput.project_id
+      );
+    }
+
+    const { data: currentTodo, error: fetchError } = await currentQuery.single();
 
     if (fetchError || !currentTodo) {
       return { success: false, error: "Todo not found or access denied" };
     }
 
     // Toggle the done status
-    const { data, error } = await supabase
+    let toggleQuery = supabase
       .from("todos")
       .update({ done: !currentTodo.done })
       .eq("id", validatedInput.id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      toggleQuery = toggleQuery.eq("project_id", validatedInput.project_id);
+    }
+
+    const { data, error } = await toggleQuery.select().single();
 
     if (error) {
       console.error("Error toggling todo:", error);
@@ -452,11 +606,17 @@ export async function deleteTodo(
     const supabase = await createClient();
 
     // Delete todo (RLS ensures user can only delete their own todos)
-    const { error } = await supabase
+    let query = supabase
       .from("todos")
       .delete()
       .eq("id", validatedInput.id)
       .eq("user_id", user.id);
+
+    if (validatedInput.project_id !== undefined) {
+      query = query.eq("project_id", validatedInput.project_id);
+    }
+
+    const { error } = await query;
 
     if (error) {
       console.error("Error deleting todo:", error);
@@ -475,7 +635,9 @@ export async function deleteTodo(
 }
 
 // Clear all completed todos
-export async function clearCompletedTodos(): Promise<ActionResponse<void>> {
+export async function clearCompletedTodos(
+  input?: ClearCompletedTodosInput
+): Promise<ActionResponse<void>> {
   try {
     // Get authenticated user
     const { user, error: authError } = await getAuthenticatedUser();
@@ -484,12 +646,18 @@ export async function clearCompletedTodos(): Promise<ActionResponse<void>> {
     }
 
     const supabase = await createClient();
+    const projectId = await resolveProjectId(
+      supabase,
+      user.id,
+      input?.project_id
+    );
 
     // Delete all completed todos for the user
     const { error } = await supabase
       .from("todos")
       .delete()
       .eq("user_id", user.id)
+      .eq("project_id", projectId)
       .eq("done", true);
 
     if (error) {
@@ -500,6 +668,9 @@ export async function clearCompletedTodos(): Promise<ActionResponse<void>> {
     revalidatePath("/");
     return { success: true };
   } catch (error) {
+    if (error instanceof ProjectResolutionError) {
+      return { success: false, error: error.message };
+    }
     console.error("Unexpected error in clearCompletedTodos:", error);
     return { success: false, error: "An unexpected error occurred" };
   }
