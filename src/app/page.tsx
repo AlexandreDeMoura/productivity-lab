@@ -339,6 +339,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
   const router = useRouter();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const previousLayoutsRef = useRef<Partial<Record<BlockId, BlockLayout>>>({});
@@ -380,6 +381,23 @@ export default function Home() {
       });
     },
     []
+  );
+
+  const resolveProjectIdForTodo = useCallback(
+    (id: number) => {
+      const optimisticMatch = optimisticTodos.find((todo) => todo.id === id);
+      if (optimisticMatch) {
+        return optimisticMatch.project_id;
+      }
+
+      const persistedMatch = todos.find((todo) => todo.id === id);
+      if (persistedMatch) {
+        return persistedMatch.project_id;
+      }
+
+      return activeProjectId;
+    },
+    [activeProjectId, optimisticTodos, todos]
   );
 
   const raiseBlock = useCallback((id: BlockId) => {
@@ -625,23 +643,38 @@ export default function Home() {
     []
   );
 
-  useEffect(() => {
-    loadTodos();
-  }, []);
-
-  const loadTodos = async () => {
+  const loadTodos = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    const result = await getTodos();
+    const result = await getTodos(
+      activeProjectId ? { project_id: activeProjectId } : undefined
+    );
     if (result.success && result.data) {
       setTodos(result.data);
       setIsAuthenticated(true);
+      const nextProjectId =
+        result.data.length > 0
+          ? result.data[0].project_id
+          : activeProjectId;
+      if (
+        nextProjectId !== undefined &&
+        nextProjectId !== null &&
+          nextProjectId !== activeProjectId
+      ) {
+        setActiveProjectId(nextProjectId);
+      }
     } else {
       setError(result.error || "Failed to load todos");
-      setIsAuthenticated(false);
+      const shouldForceSignOut =
+        result.error === "You must be logged in to perform this action";
+      setIsAuthenticated(!shouldForceSignOut);
     }
     setIsLoading(false);
-  };
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    loadTodos();
+  }, [loadTodos]);
 
   const sortByCreatedAt = (a: OptimisticTodo, b: OptimisticTodo) =>
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -678,6 +711,7 @@ export default function Home() {
       content: [],
       done: false,
       user_id: "optimistic",
+      project_id: activeProjectId ?? -1,
       created_at: now,
       updated_at: now,
       optimistic: true,
@@ -685,9 +719,13 @@ export default function Home() {
     setNewTodo("");
     startTransition(async () => {
       updateOptimisticTodos({ type: "create", todo: optimisticTodo });
-      const result = await createTodo({ text: value });
+      const result = await createTodo({
+        text: value,
+        ...(activeProjectId !== null ? { project_id: activeProjectId } : {}),
+      });
       if (result.success && result.data) {
         setTodos((previous) => [...previous, result.data!]);
+        setActiveProjectId(result.data.project_id);
       } else {
         setError(result.error || "Failed to create todo");
         setNewTodo(value);
@@ -706,7 +744,10 @@ export default function Home() {
     setError(null);
     startTransition(async () => {
       updateOptimisticTodos({ type: "toggle", id });
-      const result = await toggleTodo({ id });
+      const projectId = resolveProjectIdForTodo(id);
+      const result = await toggleTodo(
+        projectId !== null ? { id, project_id: projectId } : { id }
+      );
       if (result.success && result.data) {
         setTodos((previous) =>
           previous.map((todo) => (todo.id === id ? result.data! : todo))
@@ -721,7 +762,10 @@ export default function Home() {
     setError(null);
     startTransition(async () => {
       updateOptimisticTodos({ type: "delete", id });
-      const result = await deleteTodo({ id });
+      const projectId = resolveProjectIdForTodo(id);
+      const result = await deleteTodo(
+        projectId !== null ? { id, project_id: projectId } : { id }
+      );
       if (result.success) {
         setTodos((previous) => previous.filter((todo) => todo.id !== id));
       } else {
@@ -734,7 +778,9 @@ export default function Home() {
     setError(null);
     startTransition(async () => {
       updateOptimisticTodos({ type: "clearCompleted" });
-      const result = await clearCompletedTodos();
+      const result = await clearCompletedTodos(
+        activeProjectId !== null ? { project_id: activeProjectId } : undefined
+      );
       if (result.success) {
         setTodos((previous) => previous.filter((todo) => !todo.done));
       } else {
@@ -762,13 +808,18 @@ export default function Home() {
         startTransition(async () => {
           let didSucceed = false;
           try {
+            const projectId = resolveProjectIdForTodo(id);
             updateOptimisticTodos({
               type: "updateContent",
               id,
               content: snapshot,
             });
 
-            const result = await updateTodoContent({ id, content: snapshot });
+            const result = await updateTodoContent(
+              projectId !== null
+                ? { id, content: snapshot, project_id: projectId }
+                : { id, content: snapshot }
+            );
 
             if (result.success && result.data) {
               setTodos((previous) =>
@@ -787,7 +838,14 @@ export default function Home() {
         });
       });
     },
-    [isAuthenticated, startTransition, updateOptimisticTodos, setError, setTodos]
+    [
+      isAuthenticated,
+      startTransition,
+      updateOptimisticTodos,
+      resolveProjectIdForTodo,
+      setError,
+      setTodos,
+    ]
   );
 
   const handleUpdateText = useCallback(
@@ -810,7 +868,12 @@ export default function Home() {
           try {
             updateOptimisticTodos({ type: "updateText", id, text: trimmed });
 
-            const result = await updateTodoText({ id, text: trimmed });
+            const projectId = resolveProjectIdForTodo(id);
+            const result = await updateTodoText(
+              projectId !== null
+                ? { id, text: trimmed, project_id: projectId }
+                : { id, text: trimmed }
+            );
 
             if (result.success && result.data) {
               setTodos((previous) =>
@@ -833,6 +896,7 @@ export default function Home() {
       isAuthenticated,
       startTransition,
       updateOptimisticTodos,
+      resolveProjectIdForTodo,
       setError,
       setTodos,
     ]
