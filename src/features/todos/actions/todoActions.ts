@@ -36,9 +36,7 @@ type CreateTodoActionInput = Omit<CreateTodoInput, "project_id"> & {
   project_id?: number;
 };
 
-type GetTodosActionInput = Partial<GetTodosInput> & {
-  project_id?: number;
-};
+type GetTodosActionInput = Partial<GetTodosInput>;
 
 type ClearCompletedTodosInput = {
   project_id?: number;
@@ -211,7 +209,7 @@ export async function getTodos(
     const validatedInput = getTodosSchema.parse({
       ...input,
       project_id: projectId,
-    } satisfies GetTodosInput);
+    });
 
     // Build query
     let query = supabase
